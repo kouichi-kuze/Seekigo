@@ -27,9 +27,12 @@ const { title, description } = Astro.props
         <a href="/" class="logo">
           <span class="logo__seek">Seek</span><span class="logo__igo">igo</span>
         </a>
-        <nav class="site-nav">
+        <nav class="site-nav" aria-label="主要ナビ">
           <a href="/tokyo/">東京</a>
           <a href="/tokyo/today/" class="site-nav__today">今日</a>
+          <a href="/tokyo/this-weekend/" class="site-nav__extra">今週末</a>
+          <a href="/tokyo/free/" class="site-nav__extra">無料</a>
+          <a href="/tokyo/with-kids/" class="site-nav__extra">子どもと</a>
         </nav>
       </div>
     </header>
@@ -122,13 +125,14 @@ const { title, description } = Astro.props
   .site-nav {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
   }
   .site-nav a {
     font-size: 14px;
     font-weight: 500;
     color: var(--c-muted) !important;
     transition: color 0.15s;
+    white-space: nowrap;
   }
   .site-nav a:hover { color: var(--c-text) !important; }
   .site-nav__today {
@@ -142,6 +146,22 @@ const { title, description } = Astro.props
   .site-nav__today:hover {
     background: var(--c-primary-dk);
     color: var(--c-white) !important;
+  }
+
+  /* SPでは主要2項目のみ（既存レイアウトを壊さない） */
+  @media (max-width: 719px) {
+    .site-nav {
+      gap: 12px;
+    }
+    .site-nav__extra {
+      display: none;
+    }
+  }
+
+  @media (min-width: 720px) {
+    .site-nav {
+      gap: 18px;
+    }
   }
 
   /* ─── Inner wrapper (shared) ─── */

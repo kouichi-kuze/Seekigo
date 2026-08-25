@@ -1,6 +1,7 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
 import { supabase } from '../../../lib/supabase'
+import { formatAreaLabel, formatEventDateRange } from '../../../lib/display'
 
 export async function getStaticPaths() {
   const { data: events } = await supabase
@@ -23,20 +24,15 @@ const { data: event } = await supabase
   .eq('status', 'published')
   .single()
 
-const dateLabel = (() => {
-  if (!event?.start_date) return null
-  if (event.end_date && event.end_date !== event.start_date) {
-    return `${event.start_date} ～ ${event.end_date}`
-  }
-  return event.start_date
-})()
+const dateLabel = formatEventDateRange(event?.start_date, event?.end_date)
+const areaLabel = formatAreaLabel(event?.area)
 
 const timeLabel = (() => {
   if (!event) return null
   const start = event.start_time?.trim() || null
   const end = event.end_time?.trim() || null
   if (!start && !end) return null
-  if (start && end) return `${start} ～ ${end}`
+  if (start && end) return `${start} 〜 ${end}`
   return start ?? end
 })()
 
@@ -49,7 +45,7 @@ const hasMeta = Boolean(
     (dateLabel ||
       timeLabel ||
       event.venue ||
-      event.area ||
+      areaLabel ||
       event.address ||
       event.price_text),
 )
@@ -80,7 +76,7 @@ const hasMeta = Boolean(
               {event.is_night && <span class="tag">夜</span>}
             </div>
           )}
-          {event.area && <p class="event-area">{event.area}</p>}
+          {areaLabel && <p class="event-area">{areaLabel}</p>}
           <h1 class="event-title">{event.title}</h1>
         </header>
 
@@ -115,10 +111,10 @@ const hasMeta = Boolean(
                 <dd>{event.venue}</dd>
               </div>
             )}
-            {event.area && (
+            {areaLabel && (
               <div class="event-meta__row">
                 <dt>エリア</dt>
-                <dd>{event.area}</dd>
+                <dd>{areaLabel}</dd>
               </div>
             )}
             {event.address && (
@@ -246,11 +242,10 @@ const hasMeta = Boolean(
     letter-spacing: 0.02em;
   }
   .event-area {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     color: var(--c-primary);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.02em;
   }
   .event-title {
     font-size: clamp(22px, 5vw, 40px);
