@@ -68,8 +68,19 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           trap 'rm -f ~/.ssh/id_ed25519' EXIT
 
-          # known_hosts（ホスト鍵検証を有効にするため先に登録）
           # Host / User / Secret の値そのものはログに出さない
+          echo "Checking TCP reachability to Xserver SSH port..."
+          set +e
+          timeout 10 bash -c "cat < /dev/null > /dev/tcp/${XSERVER_HOST}/${XSERVER_PORT}"
+          tcp_status=$?
+          set -e
+          if [ "$tcp_status" -ne 0 ]; then
+            echo "ERROR: Cannot reach Xserver SSH port"
+            exit 1
+          fi
+          echo "Xserver SSH port reachable"
+
+          # known_hosts（ホスト鍵検証を有効にするため先に登録）
           echo "Scanning Xserver SSH host key..."
           : > ~/.ssh/known_hosts
           set +e
