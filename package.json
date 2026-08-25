@@ -9,10 +9,28 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "fetch:gotokyo": "tsx scripts/fetch-gotokyo.ts",
+    "fetch:gotokyo:details": "tsx scripts/fetch-gotokyo-details.ts",
+    "enrich:gotokyo:ai": "tsx scripts/enrich-events-ai.ts",
+    "enrich:enjoytokyo:ai": "tsx scripts/enrich-enjoytokyo-ai.ts",
+    "import:gotokyo": "tsx scripts/import-events-supabase.ts",
+    "sync:gotokyo": "tsx scripts/sync-gotokyo.ts",
+    "sync:all": "tsx scripts/sync-all.ts",
+    "fetch:enjoytokyo": "tsx scripts/fetch-enjoytokyo.ts",
+    "fetch:enjoytokyo:details": "tsx scripts/fetch-enjoytokyo-details.ts",
+    "dedupe:enjoytokyo": "tsx scripts/check-event-duplicates.ts",
+    "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts"
   },
   "dependencies": {
+    "@astrojs/node": "^11.1.4",
     "@supabase/supabase-js": "^2.112.4",
-    "astro": "^7.2.4"
+    "astro": "^7.2.4",
+    "cheerio": "^1.2.0",
+    "openai": "^7.5.0"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.12"
   }
 }

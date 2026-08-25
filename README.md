@@ -49,3 +49,9 @@ Feel free to check [our documentation](https://docs.astro.build) or jump into ou
 
 git add .
 git status
+
+
+npm run sync:gotokyo
+
+
+取得 → 詳細解析 → 重複判定 → 複数ソース統合 → AI整形 → 人間承認 → 公開

@@ -4,7 +4,11 @@ const { event } = Astro.props
 
 <article class="event-card">
   <h2 class="event-card__title">
-    {event.title}
+    {event.slug ? (
+      <a href={`/tokyo/event/${event.slug}/`}>{event.title}</a>
+    ) : (
+      event.title
+    )}
   </h2>
 
   <div class="event-card__meta">

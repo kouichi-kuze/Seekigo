@@ -1,0 +1,36 @@
+---
+import Layout from '../../../layouts/Layout.astro'
+import { getFreeEvents } from '../../../lib/events'
+import EventCard from '../../../components/EventCard.astro'
+
+const events = await getFreeEvents()
+---
+
+<Layout
+  title="東京の無料イベント | Seekigo"
+  description="東京で開催される無料のイベント・お祭り・展示・お出かけ情報を紹介します。"
+>
+  <main>
+    <p>
+      <a href="/tokyo/">東京イベントTOP</a>
+    </p>
+
+    <header>
+      <h1>東京の無料イベント</h1>
+    </header>
+
+    <section>
+      <h2>無料で楽しめるイベント</h2>
+
+      {events.length > 0 ? (
+        <div>
+          {events.map((event) => (
+            <EventCard event={event} />
+          ))}
+        </div>
+      ) : (
+        <p>現在掲載中の無料イベントはありません。</p>
+      )}
+    </section>
+  </main>
+</Layout>

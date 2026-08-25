@@ -1,0 +1,36 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import { getPublishedEvents } from '../../lib/events'
+import EventCard from '../../components/EventCard.astro'
+
+const events = await getPublishedEvents()
+---
+
+<Layout
+  title="東京のイベント | Seekigo"
+  description="東京で開催されるイベント・お祭り・展示・グルメ・お出かけ情報を紹介します。"
+>
+  <main>
+    <header>
+      <h1>東京のイベント</h1>
+    </header>
+
+    <nav>
+      <a href="/tokyo/today/">今日のイベントを見る</a>
+    </nav>
+
+    <section>
+      <h2>開催中・近日開催のイベント</h2>
+
+      {events && events.length > 0 ? (
+        <div>
+          {events.map((event) => (
+            <EventCard event={event} />
+          ))}
+        </div>
+      ) : (
+        <p>現在掲載中のイベントはありません。</p>
+      )}
+    </section>
+  </main>
+</Layout>

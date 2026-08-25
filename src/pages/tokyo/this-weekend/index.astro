@@ -1,0 +1,37 @@
+---
+import Layout from '../../../layouts/Layout.astro'
+import { getThisWeekendEvents } from '../../../lib/events'
+import EventCard from '../../../components/EventCard.astro'
+
+const { saturday, sunday, events } = await getThisWeekendEvents()
+---
+
+<Layout
+  title="今週末の東京イベント | Seekigo"
+  description="今週末に東京で開催されるイベント・お祭り・展示・グルメ・子ども向けのお出かけ情報を紹介します。"
+>
+  <main>
+    <p>
+      <a href="/tokyo/">東京イベントTOP</a>
+    </p>
+
+    <header>
+      <h1>今週末の東京イベント</h1>
+      <p>{saturday} ～ {sunday}</p>
+    </header>
+
+    <section>
+      <h2>今週末のイベント</h2>
+
+      {events.length > 0 ? (
+        <div>
+          {events.map((event) => (
+            <EventCard event={event} />
+          ))}
+        </div>
+      ) : (
+        <p>今週末に開催予定の掲載イベントはありません。</p>
+      )}
+    </section>
+  </main>
+</Layout>

@@ -1,0 +1,133 @@
+---
+import Layout from '../../../layouts/Layout.astro'
+import { getEventBySlug, getPublishedEvents } from '../../../lib/events'
+
+export async function getStaticPaths() {
+  const events = await getPublishedEvents()
+
+  return events
+    .filter((event) => typeof event.slug === 'string' && event.slug.length > 0)
+    .map((event) => ({
+      params: { slug: event.slug as string },
+    }))
+}
+
+const slug = Astro.params.slug
+
+if (!slug) {
+  return Astro.rewrite('/404')
+}
+
+const event = await getEventBySlug(slug)
+
+if (!event) {
+  return Astro.rewrite('/404')
+}
+
+const dateLabel =
+  event.start_date &&
+  event.end_date &&
+  event.end_date !== event.start_date
+    ? `${event.start_date} ～ ${event.end_date}`
+    : event.start_date
+
+const timeLabel =
+  event.start_time || event.end_time
+    ? [event.start_time, event.end_time].filter(Boolean).join(' ～ ')
+    : null
+
+const categoryLabel = Array.isArray(event.category)
+  ? event.category.filter(Boolean).join('、')
+  : event.category
+---
+
+<Layout
+  title={`${event.title} | 東京イベント | Seekigo`}
+  description={event.summary ?? undefined}
+>
+  <main>
+    <p>
+      <a href="/tokyo/">東京イベントTOP</a>
+    </p>
+
+    <article>
+      <header>
+        <h1>{event.title}</h1>
+      </header>
+
+      {dateLabel && (
+        <p>
+          <strong>開催日：</strong>
+          {dateLabel}
+        </p>
+      )}
+
+      {timeLabel && (
+        <p>
+          <strong>時間：</strong>
+          {timeLabel}
+        </p>
+      )}
+
+      {event.venue && (
+        <p>
+          <strong>場所：</strong>
+          {event.venue}
+        </p>
+      )}
+
+      {event.area && (
+        <p>
+          <strong>エリア：</strong>
+          {event.area}
+        </p>
+      )}
+
+      {event.address && (
+        <p>
+          <strong>住所：</strong>
+          {event.address}
+        </p>
+      )}
+
+      {event.price_text && (
+        <p>
+          <strong>料金：</strong>
+          {event.price_text}
+        </p>
+      )}
+
+      {categoryLabel && (
+        <p>
+          <strong>カテゴリ：</strong>
+          {categoryLabel}
+        </p>
+      )}
+
+      {(event.is_free || event.is_kids || event.is_indoor || event.is_night) && (
+        <p>
+          {event.is_free && <span>無料 </span>}
+          {event.is_kids && <span>子ども向け </span>}
+          {event.is_indoor && <span>屋内 </span>}
+          {event.is_night && <span>夜開催 </span>}
+        </p>
+      )}
+
+      {event.summary && (
+        <p>{event.summary}</p>
+      )}
+
+      {event.official_url && (
+        <p>
+          <a
+            href={event.official_url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            公式サイトを見る
+          </a>
+        </p>
+      )}
+    </article>
+  </main>
+</Layout>

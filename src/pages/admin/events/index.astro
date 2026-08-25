@@ -1,0 +1,516 @@
+---
+/**
+ * 開発用 Draft 承認画面。
+ * - production では middleware で 404（このページは DEV 専用）
+ * - Service Role は server のみ（createAdminClient）
+ * - 将来の認証は middleware / この frontmatter 先頭に追加する
+ */
+export const prerender = false
+
+import { createAdminClient } from '../../../lib/supabase-admin'
+import {
+  getOrCreateAdminCsrfToken,
+  parsePositiveIntIds,
+  verifyAdminCsrf,
+} from '../../../lib/admin-security'
+
+// 二重ガード（middleware 以外からも production を拒否）
+if (import.meta.env.PROD) {
+  return new Response('Not Found', {
+    status: 404,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Robots-Tag': 'noindex, nofollow',
+    },
+  })
+}
+
+type AdminEvent = {
+  id: number | string
+  title: string | null
+  slug: string | null
+  area: string | null
+  start_date: string | null
+  end_date: string | null
+  venue: string | null
+  category: string[] | null
+  summary: string | null
+  source_url: string | null
+  official_url: string | null
+  status: string | null
+}
+
+let message: string | null = null
+let errorMessage: string | null = null
+
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData()
+    const csrfCheck = verifyAdminCsrf({
+      formToken: String(form.get('csrf_token') ?? ''),
+      cookieToken: Astro.cookies.get('seekigo_admin_csrf')?.value,
+      request: Astro.request,
+      url: Astro.url,
+    })
+
+    if (!csrfCheck.ok) {
+      errorMessage = `Security check failed: ${csrfCheck.reason}`
+    } else {
+      const intent = String(form.get('intent') ?? '')
+      const admin = createAdminClient()
+
+      if (intent === 'publish') {
+        const ids = parsePositiveIntIds(
+          [form.get('event_id')].filter(Boolean) as FormDataEntryValue[],
+        )
+        if (ids.length !== 1) {
+          errorMessage = 'Invalid event id'
+        } else {
+          const eventId = ids[0]
+          const { data: existing, error: selectError } = await admin
+            .from('events')
+            .select('id, status, title')
+            .eq('id', eventId)
+            .maybeSingle()
+
+          if (selectError) throw selectError
+          if (!existing) {
+            errorMessage = `Event id=${eventId} not found`
+          } else if (existing.status !== 'draft') {
+            errorMessage = `Event is not draft (status=${existing.status})`
+          } else {
+            const { error: updateError } = await admin
+              .from('events')
+              .update({
+                status: 'published',
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', eventId)
+              .eq('status', 'draft')
+
+            if (updateError) throw updateError
+
+            return Astro.redirect(
+              `/admin/events/?published=1&title=${encodeURIComponent(String(existing.title ?? eventId))}`,
+            )
+          }
+        }
+      } else if (intent === 'publish_selected') {
+        const ids = parsePositiveIntIds(form.getAll('event_ids'))
+        if (ids.length === 0) {
+          errorMessage = 'イベントが選択されていません'
+        } else {
+          const now = new Date().toISOString()
+          const { data: updated, error: updateError } = await admin
+            .from('events')
+            .update({
+              status: 'published',
+              updated_at: now,
+            })
+            .in('id', ids)
+            .eq('status', 'draft')
+            .select('id')
+
+          if (updateError) throw updateError
+
+          const count = updated?.length ?? 0
+          return Astro.redirect(`/admin/events/?bulk=${count}`)
+        }
+      } else {
+        errorMessage = 'Invalid publish request'
+      }
+    }
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error)
+  }
+}
+
+const publishedCount = Astro.url.searchParams.get('published')
+const publishedTitle = Astro.url.searchParams.get('title')
+const bulkCount = Astro.url.searchParams.get('bulk')
+
+if (bulkCount && !message) {
+  const n = Number(bulkCount)
+  if (Number.isFinite(n) && n >= 0) {
+    message = `${n}件をPublishしました`
+  }
+} else if (publishedCount && !message) {
+  message = publishedTitle
+    ? `Published: ${publishedTitle}`
+    : '1件をPublishしました'
+}
+
+let events: AdminEvent[] = []
+let loadError: string | null = null
+
+try {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('events')
+    .select(
+      'id, title, slug, area, start_date, end_date, venue, category, summary, source_url, official_url, status',
+    )
+    .eq('status', 'draft')
+    .order('start_date', { ascending: true })
+
+  if (error) throw error
+  events = (data ?? []) as AdminEvent[]
+} catch (error) {
+  loadError = error instanceof Error ? error.message : String(error)
+}
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Draft Events Admin (DEV) | Seekigo</title>
+  </head>
+
+  <body>
+    <main class="admin">
+      <p class="dev-banner">
+        DEV ONLY — 開発用の簡易承認画面です。認証未実装のため本番では公開しません（middleware で 404）。
+      </p>
+
+      <header>
+        <h1>Draft Events</h1>
+        <p>
+          自動取得イベント（status = draft）を確認し、Publish で公開します。
+        </p>
+        <p>
+          <a href="/tokyo/">公開一覧 /tokyo/ を開く</a>
+          · draft {events.length} 件
+        </p>
+      </header>
+
+      {message && <p class="ok">{message}</p>}
+      {errorMessage && <p class="err">{errorMessage}</p>}
+      {loadError && <p class="err">Load error: {loadError}</p>}
+
+      {!loadError && events.length === 0 && (
+        <p>現在、draft のイベントはありません。</p>
+      )}
+
+      {/* 一括 Publish 用フォーム（チェックボックスは form 属性で紐付け） */}
+      {events.length > 0 && (
+        <form method="POST" id="bulk-form">
+          <input type="hidden" name="csrf_token" value={csrfToken} />
+          <input type="hidden" name="intent" value="publish_selected" />
+
+          <div class="toolbar" id="bulk-toolbar">
+            <label class="select-all">
+              <input type="checkbox" id="select-all" />
+              全選択
+            </label>
+            <span id="selected-count" class="selected-count">0件選択</span>
+            <button type="submit" id="bulk-publish" disabled>
+              選択したイベントをPublish
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* 個別 Publish フォーム（カード内ボタンから form= で参照） */}
+      {events.map((event) => (
+        <form
+          method="POST"
+          id={`publish-${event.id}`}
+          class="visually-hidden-form"
+        >
+          <input type="hidden" name="csrf_token" value={csrfToken} />
+          <input type="hidden" name="intent" value="publish" />
+          <input type="hidden" name="event_id" value={String(event.id)} />
+        </form>
+      ))}
+
+      <div class="list">
+        {events.map((event) => (
+          <article class="card">
+            <label class="row-select">
+              <input
+                type="checkbox"
+                name="event_ids"
+                value={String(event.id)}
+                class="row-check"
+                form="bulk-form"
+              />
+              <span class="sr-only">選択: {event.title}</span>
+            </label>
+
+            <div class="card-body">
+              <h2>{event.title}</h2>
+
+              <dl>
+                <div>
+                  <dt>area</dt>
+                  <dd>{event.area ?? 'null'}</dd>
+                </div>
+                <div>
+                  <dt>start_date</dt>
+                  <dd>{event.start_date ?? 'null'}</dd>
+                </div>
+                <div>
+                  <dt>end_date</dt>
+                  <dd>{event.end_date ?? 'null'}</dd>
+                </div>
+                <div>
+                  <dt>venue</dt>
+                  <dd>{event.venue ?? 'null'}</dd>
+                </div>
+                <div>
+                  <dt>category</dt>
+                  <dd>
+                    {Array.isArray(event.category)
+                      ? event.category.join(', ')
+                      : 'null'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>summary</dt>
+                  <dd>{event.summary ?? 'null'}</dd>
+                </div>
+                <div>
+                  <dt>source_url</dt>
+                  <dd>
+                    {event.source_url ? (
+                      <a
+                        href={event.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {event.source_url}
+                      </a>
+                    ) : (
+                      'null'
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>official_url</dt>
+                  <dd>
+                    {event.official_url ? (
+                      <a
+                        href={event.official_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {event.official_url}
+                      </a>
+                    ) : (
+                      'null'
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>slug</dt>
+                  <dd>{event.slug ?? 'null'}</dd>
+                </div>
+                <div>
+                  <dt>id</dt>
+                  <dd>{String(event.id)}</dd>
+                </div>
+              </dl>
+
+              <button type="submit" form={`publish-${event.id}`}>
+                Publish（この1件）
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </main>
+
+    <script>
+      const selectAll = document.getElementById(
+        'select-all',
+      ) as HTMLInputElement | null
+      const checks = Array.from(
+        document.querySelectorAll<HTMLInputElement>('.row-check'),
+      )
+      const countEl = document.getElementById('selected-count')
+      const bulkBtn = document.getElementById(
+        'bulk-publish',
+      ) as HTMLButtonElement | null
+      const bulkForm = document.getElementById(
+        'bulk-form',
+      ) as HTMLFormElement | null
+
+      function refresh() {
+        const selected = checks.filter((c) => c.checked)
+        if (countEl) countEl.textContent = `${selected.length}件選択`
+        if (bulkBtn) bulkBtn.disabled = selected.length === 0
+        if (selectAll) {
+          selectAll.checked =
+            checks.length > 0 && selected.length === checks.length
+          selectAll.indeterminate =
+            selected.length > 0 && selected.length < checks.length
+        }
+      }
+
+      selectAll?.addEventListener('change', () => {
+        const on = selectAll.checked
+        for (const c of checks) c.checked = on
+        refresh()
+      })
+
+      for (const c of checks) {
+        c.addEventListener('change', refresh)
+      }
+
+      bulkForm?.addEventListener('submit', (e) => {
+        const selected = checks.filter((c) => c.checked)
+        if (selected.length === 0) {
+          e.preventDefault()
+          return
+        }
+        if (
+          !confirm(`${selected.length}件を Publish します。よろしいですか？`)
+        ) {
+          e.preventDefault()
+        }
+      })
+
+      refresh()
+    </script>
+  </body>
+</html>
+
+<style>
+  .admin {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    font-family: system-ui, sans-serif;
+    line-height: 1.5;
+  }
+
+  .dev-banner {
+    background: #fff3cd;
+    border: 1px solid #e6c200;
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+  }
+
+  .ok {
+    color: #0a7a32;
+    font-weight: 600;
+  }
+
+  .err {
+    color: #a40000;
+  }
+
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    background: #f6f6f6;
+    border: 1px solid #ddd;
+  }
+
+  .select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .selected-count {
+    color: #555;
+    font-size: 0.95rem;
+  }
+
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .card {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.75rem;
+    border: 1px solid #ddd;
+    padding: 1rem;
+    align-items: start;
+  }
+
+  .row-select {
+    display: block;
+    padding-top: 0.25rem;
+    cursor: pointer;
+  }
+
+  .row-check {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+
+  .card h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.15rem;
+  }
+
+  dl {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  dl > div {
+    display: grid;
+    grid-template-columns: 8rem 1fr;
+    gap: 0.5rem;
+  }
+
+  dt {
+    font-weight: 600;
+    color: #555;
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  button {
+    margin-top: 0.75rem;
+    padding: 0.5rem 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .visually-hidden-form {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+  }
+</style>
