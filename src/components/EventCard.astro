@@ -1,0 +1,78 @@
+---
+const { event } = Astro.props
+---
+
+<article class="event-card">
+  <h2 class="event-card__title">
+    {event.title}
+  </h2>
+
+  <div class="event-card__meta">
+    {event.start_date && (
+      <p>
+        <strong>開催日：</strong>
+        {event.start_date}
+        {event.end_date && event.end_date !== event.start_date
+          ? ` ～ ${event.end_date}`
+          : ''}
+      </p>
+    )}
+
+    {event.venue && (
+      <p>
+        <strong>場所：</strong>
+        {event.venue}
+      </p>
+    )}
+
+    {event.area && (
+      <p>
+        <strong>エリア：</strong>
+        {event.area}
+      </p>
+    )}
+
+    {event.price_text && (
+      <p>
+        <strong>料金：</strong>
+        {event.price_text}
+      </p>
+    )}
+  </div>
+
+  {event.summary && (
+    <p class="event-card__summary">
+      {event.summary}
+    </p>
+  )}
+
+  <div class="event-card__tags">
+    {event.is_free && (
+      <span class="event-card__tag">無料</span>
+    )}
+
+    {event.is_kids && (
+      <span class="event-card__tag">子ども向け</span>
+    )}
+
+    {event.is_indoor && (
+      <span class="event-card__tag">屋内</span>
+    )}
+
+    {event.is_night && (
+      <span class="event-card__tag">夜開催</span>
+    )}
+  </div>
+
+  {event.official_url && (
+    <p>
+      <a
+        href={event.official_url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        公式サイトを見る
+      </a>
+    </p>
+  )}
+</article>

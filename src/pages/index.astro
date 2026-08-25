@@ -1,0 +1,38 @@
+---
+import { supabase } from '../lib/supabase'
+
+const { data: events, error } = await supabase
+  .from('events')
+  .select('*')
+  .eq('status', 'published')
+  .order('start_date', { ascending: true })
+
+if (error) {
+  console.error(error)
+}
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Seekigo</title>
+  </head>
+
+  <body>
+    <main>
+      <h1>Seekigo</h1>
+      <p>東京のイベント・お出かけ情報</p>
+
+      <h2>Events</h2>
+
+      {events?.map((event) => (
+        <article>
+          <h3>{event.title}</h3>
+          <p>{event.start_date}</p>
+          <p>{event.venue}</p>
+          <p>{event.summary}</p>
+        </article>
+      ))}
+    </main>
+  </body>
+</html>

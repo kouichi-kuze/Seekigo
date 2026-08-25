@@ -1,0 +1,55 @@
+---
+import { supabase } from '../../lib/supabase'
+import EventCard from '../../components/EventCard.astro'
+
+const { data: events, error } = await supabase
+  .from('events')
+  .select('*')
+  .eq('status', 'published')
+  .order('start_date', { ascending: true })
+
+if (error) {
+  console.error(error)
+}
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+
+    <title>今日の東京イベント | Seekigo</title>
+
+    <meta
+      name="description"
+      content="今日東京で開催されるイベント・お祭り・展示・グルメ・お出かけ情報を紹介します。"
+    />
+  </head>
+
+  <body>
+    <main>
+      <p>
+        <a href="/tokyo/">東京イベントTOP</a>
+      </p>
+
+      <header>
+        <h1>今日の東京イベント</h1>
+        <p>{today}</p>
+      </header>
+
+      <section>
+        <h2>東京のイベント</h2>
+
+        {events && events.length > 0 ? (
+          <div>
+            {events.map((event) => (
+              <EventCard event={event} />
+            ))}
+          </div>
+        ) : (
+          <p>現在掲載中のイベントはありません。</p>
+        )}
+      </section>
+    </main>
+  </body>
+</html>
