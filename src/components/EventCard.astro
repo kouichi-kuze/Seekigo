@@ -1,82 +1,384 @@
 ---
+interface Props {
+  event: {
+    id?: string | number
+    slug?: string | null
+    title: string
+    image_url?: string | null
+    start_date?: string | null
+    end_date?: string | null
+    venue?: string | null
+    area?: string | null
+    price_text?: string | null
+    summary?: string | null
+    is_free?: boolean
+    is_kids?: boolean
+    is_indoor?: boolean
+    is_night?: boolean
+    official_url?: string | null
+  }
+}
+
 const { event } = Astro.props
+
+const hasAnyTag = event.is_free || event.is_kids || event.is_indoor || event.is_night
+
+const dateLabel = (() => {
+  if (!event.start_date) return null
+  if (event.end_date && event.end_date !== event.start_date) {
+    return `${event.start_date} ～ ${event.end_date}`
+  }
+  return event.start_date
+})()
+
+// プレースホルダー用: タグ優先でアクセントカラーと背景を決定
+const placeholderConfig = (() => {
+  if (event.is_night)  return { icon: '🌙', from: '#1e3a5f', to: '#0f2040', label: '夜のイベント' }
+  if (event.is_kids)   return { icon: '🎈', from: '#f97316', to: '#f59e0b', label: '子どもイベント' }
+  if (event.is_free)   return { icon: '🎁', from: '#059669', to: '#0ea5e9', label: '無料イベント' }
+  if (event.is_indoor) return { icon: '🏛️', from: '#7c3aed', to: '#0ea5e9', label: '屋内イベント' }
+  return { icon: '☀️', from: '#0ea5e9', to: '#a3e635', label: '日中のイベント' }
+})()
+
+// タイトルの頭文字（漢字/仮名/英字）
+const detailUrl = event.slug ? `/tokyo/event/${event.slug}/` : null
 ---
 
-<article class="event-card">
-  <h2 class="event-card__title">
-    {event.slug ? (
-      <a href={`/tokyo/event/${event.slug}/`}>{event.title}</a>
+<article
+  class:list={['event-card', detailUrl && 'event-card--linked']}
+  data-start={event.start_date ?? ''}
+  data-end={event.end_date ?? ''}
+  data-free={event.is_free ? 'true' : 'false'}
+  data-kids={event.is_kids ? 'true' : 'false'}
+  data-indoor={event.is_indoor ? 'true' : 'false'}
+  data-night={event.is_night ? 'true' : 'false'}
+>
+  <!-- Image -->
+  <div class="card-image">
+    {event.image_url ? (
+      <img src={event.image_url} alt={event.title} loading="lazy" decoding="async" />
     ) : (
-      event.title
-    )}
-  </h2>
-
-  <div class="event-card__meta">
-    {event.start_date && (
-      <p>
-        <strong>開催日：</strong>
-        {event.start_date}
-        {event.end_date && event.end_date !== event.start_date
-          ? ` ～ ${event.end_date}`
-          : ''}
-      </p>
-    )}
-
-    {event.venue && (
-      <p>
-        <strong>場所：</strong>
-        {event.venue}
-      </p>
-    )}
-
-    {event.area && (
-      <p>
-        <strong>エリア：</strong>
-        {event.area}
-      </p>
-    )}
-
-    {event.price_text && (
-      <p>
-        <strong>料金：</strong>
-        {event.price_text}
-      </p>
-    )}
-  </div>
-
-  {event.summary && (
-    <p class="event-card__summary">
-      {event.summary}
-    </p>
-  )}
-
-  <div class="event-card__tags">
-    {event.is_free && (
-      <span class="event-card__tag">無料</span>
-    )}
-
-    {event.is_kids && (
-      <span class="event-card__tag">子ども向け</span>
-    )}
-
-    {event.is_indoor && (
-      <span class="event-card__tag">屋内</span>
-    )}
-
-    {event.is_night && (
-      <span class="event-card__tag">夜開催</span>
-    )}
-  </div>
-
-  {event.official_url && (
-    <p>
-      <a
-        href={event.official_url}
-        target="_blank"
-        rel="noopener noreferrer"
+      <div
+        class="card-placeholder"
+        style={`background: linear-gradient(135deg, ${placeholderConfig.from} 0%, ${placeholderConfig.to} 100%);`}
+        aria-hidden="true"
       >
-        公式サイトを見る
-      </a>
-    </p>
-  )}
+        <span class="card-placeholder__icon">{placeholderConfig.icon}</span>
+        <span class="card-placeholder__label">{placeholderConfig.label}</span>
+      </div>
+    )}
+
+    {hasAnyTag && (
+      <div class="card-tags">
+        {event.is_free   && <span class="tag">無料</span>}
+        {event.is_kids   && <span class="tag">子ども向け</span>}
+        {event.is_indoor && <span class="tag">屋内</span>}
+        {event.is_night  && <span class="tag">夜</span>}
+      </div>
+    )}
+  </div>
+
+  <!-- Body -->
+  <div class="card-body">
+    {event.area && <p class="card-area">{event.area}</p>}
+
+    <h2 class="card-title">
+      {detailUrl ? (
+        <a href={detailUrl} class="card-title__link card-title__link--stretch">
+          {event.title}
+        </a>
+      ) : (
+        event.title
+      )}
+    </h2>
+
+    <dl class="card-meta">
+      {dateLabel && (
+        <>
+          <dt class="sr-only">開催日</dt>
+          <dd class="card-meta__item">
+            <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
+            </svg>
+            {dateLabel}
+          </dd>
+        </>
+      )}
+      {event.venue && (
+        <>
+          <dt class="sr-only">会場</dt>
+          <dd class="card-meta__item">
+            <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+            </svg>
+            {event.venue}
+          </dd>
+        </>
+      )}
+      {event.price_text && (
+        <>
+          <dt class="sr-only">料金</dt>
+          <dd class="card-meta__item">
+            <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd" />
+            </svg>
+            {event.price_text}
+          </dd>
+        </>
+      )}
+    </dl>
+
+    {event.summary && (
+      <p class="card-summary">{event.summary}</p>
+    )}
+
+    <div class="card-footer">
+      {detailUrl && (
+        <span class="card-detail-hint">詳細を見る →</span>
+      )}
+      {event.official_url && (
+        <a
+          class="card-cta"
+          href={event.official_url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          公式サイト
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
+            <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
+          </svg>
+        </a>
+      )}
+    </div>
+  </div>
 </article>
+
+<style>
+  /* ─── Card ─── */
+  .event-card {
+    background: var(--c-white);
+    border-radius: var(--r-md);
+    border: 1px solid var(--c-border);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative; /* stretched link のため */
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .event-card--linked:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-3px);
+    cursor: pointer;
+  }
+
+  /* ─── Image ─── */
+  .card-image {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--c-border);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+  }
+  .event-card--linked:hover .card-image img {
+    transform: scale(1.03);
+  }
+
+  /* ─── Placeholder ─── */
+  .card-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+  /* 背景のデコレーション円 */
+  .card-placeholder::before,
+  .card-placeholder::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.07);
+  }
+  .card-placeholder::before {
+    width: 120px;
+    height: 120px;
+    bottom: -30px;
+    right: -30px;
+  }
+  .card-placeholder::after {
+    width: 80px;
+    height: 80px;
+    top: -20px;
+    left: -20px;
+  }
+  .card-placeholder__icon {
+    font-size: 22px;
+    line-height: 1;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,.3));
+  }
+  .card-placeholder__label {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* ─── Tags overlay ─── */
+  .card-tags {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .tag {
+    background: var(--c-accent);
+    color: var(--c-text);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: var(--r-sm);
+    letter-spacing: 0.02em;
+  }
+
+  /* ─── Body ─── */
+  .card-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+  }
+  .card-area {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--c-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.4;
+    color: var(--c-text);
+    /* 一覧では最大2行。長いタイトルは省略（DB文字列は変更しない） */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    /* 1行タイトルでもカード高さが極端にばらつかないよう2行分を確保 */
+    min-height: calc(1.4em * 2);
+  }
+
+  /* Stretched link: カード全体をクリック領域に */
+  .card-title__link {
+    color: var(--c-text) !important;
+    text-decoration: none;
+  }
+  .card-title__link--stretch::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+
+  /* ─── Meta ─── */
+  .card-meta {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .card-meta__item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+    color: var(--c-muted);
+    line-height: 1.4;
+  }
+  .meta-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: var(--c-muted);
+  }
+
+  /* ─── Summary ─── */
+  .card-summary {
+    font-size: 12px;
+    color: var(--c-muted);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  /* ─── Footer row ─── */
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 4px;
+    gap: 8px;
+  }
+  .card-detail-hint {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-primary);
+  }
+
+  /* 公式リンクは stretched link より前面 */
+  .card-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--c-muted) !important;
+    border: 1px solid var(--c-border);
+    padding: 5px 10px;
+    border-radius: var(--r-sm);
+    white-space: nowrap;
+    position: relative;
+    z-index: 1;
+    transition: border-color 0.15s, color 0.15s;
+    flex-shrink: 0;
+  }
+  .card-cta:hover {
+    border-color: var(--c-primary);
+    color: var(--c-primary) !important;
+  }
+  .card-cta svg { width: 11px; height: 11px; }
+
+  /* ─── Accessibility ─── */
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+</style>

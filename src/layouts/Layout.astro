@@ -13,7 +13,7 @@ const { title, description } = Astro.props
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" href="/favicon.ico" />
     <meta name="generator" content={Astro.generator} />
@@ -22,15 +22,144 @@ const { title, description } = Astro.props
     <GoogleAnalytics />
   </head>
   <body>
+    <header class="site-header">
+      <div class="inner">
+        <a href="/" class="logo">
+          <span class="logo__seek">Seek</span><span class="logo__igo">igo</span>
+        </a>
+        <nav class="site-nav">
+          <a href="/tokyo/">東京</a>
+          <a href="/tokyo/today/" class="site-nav__today">今日</a>
+        </nav>
+      </div>
+    </header>
+
     <slot />
+
+    <footer class="site-footer">
+      <div class="inner">
+        <p class="site-footer__copy">© 2025 Seekigo</p>
+      </div>
+    </footer>
   </body>
 </html>
 
-<style>
-  html,
+<style is:global>
+  /* ─── Design Tokens ─── */
+  :root {
+    --c-primary:      #0EA5E9;
+    --c-primary-dk:   #0284C7;
+    --c-accent:       #A3E635;
+    --c-text:         #111827;
+    --c-muted:        #6B7280;
+    --c-bg:           #F8FAFC;
+    --c-white:        #FFFFFF;
+    --c-border:       #E5E7EB;
+
+    --r-sm:  6px;
+    --r-md:  12px;
+    --r-lg:  24px;
+
+    --shadow-sm: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.08);
+
+    --font: -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN',
+            'Noto Sans JP', 'Yu Gothic', sans-serif;
+
+    --max-w: 1200px;
+    --px:    clamp(16px, 4vw, 40px);
+  }
+
+  /* ─── Reset ─── */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: 100%; }
+
   body {
-    margin: 0;
-    width: 100%;
-    height: 100%;
+    font-family: var(--font);
+    background: var(--c-bg);
+    color: var(--c-text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img { max-width: 100%; display: block; }
+
+  a { color: var(--c-primary); text-decoration: none; }
+  a:hover { color: var(--c-primary-dk); }
+
+  h1, h2, h3, h4 { margin: 0; line-height: 1.3; }
+  p { margin: 0; }
+</style>
+
+<style>
+  /* ─── Site Header ─── */
+  .site-header {
+    background: var(--c-white);
+    border-bottom: 1px solid var(--c-border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .site-header .inner {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 var(--px);
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--c-text) !important;
+  }
+  .logo__seek { color: var(--c-text); }
+  .logo__igo  { color: var(--c-primary); }
+
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .site-nav a {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--c-muted) !important;
+    transition: color 0.15s;
+  }
+  .site-nav a:hover { color: var(--c-text) !important; }
+  .site-nav__today {
+    background: var(--c-primary);
+    color: var(--c-white) !important;
+    padding: 6px 14px;
+    border-radius: var(--r-lg);
+    font-size: 13px !important;
+    font-weight: 600 !important;
+  }
+  .site-nav__today:hover {
+    background: var(--c-primary-dk);
+    color: var(--c-white) !important;
+  }
+
+  /* ─── Inner wrapper (shared) ─── */
+  :global(.inner) {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding-left: var(--px);
+    padding-right: var(--px);
+  }
+
+  /* ─── Site Footer ─── */
+  .site-footer {
+    margin-top: 80px;
+    border-top: 1px solid var(--c-border);
+    padding: 32px 0;
+  }
+  .site-footer__copy {
+    font-size: 13px;
+    color: var(--c-muted);
   }
 </style>

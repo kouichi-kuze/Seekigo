@@ -1,37 +1,150 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
-import { getTodayEvents } from '../../../lib/events'
+import { supabase } from '../../../lib/supabase'
 import EventCard from '../../../components/EventCard.astro'
 
-const { today, events } = await getTodayEvents()
+// 今日の日付を YYYY-MM-DD 形式で取得（JST）
+const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+
+// 今日開催中のイベント：start_date <= today かつ (end_date >= today または end_date が null)
+const { data: events, error } = await supabase
+  .from('events')
+  .select('*')
+  .eq('status', 'published')
+  .lte('start_date', today)
+  .or(`end_date.gte.${today},end_date.is.null,start_date.eq.${today}`)
+  .order('start_date', { ascending: true })
+
+if (error) {
+  console.error(error)
+}
+
+// 表示用の日付ラベル（例: 2025年8月25日（月））
+const todayLabel = new Date().toLocaleDateString('ja-JP', {
+  timeZone: 'Asia/Tokyo',
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'short',
+})
 ---
 
 <Layout
-  title="東京の今日のイベント | Seekigo"
-  description="東京で今日開催されるイベント・お祭り・展示・グルメ・お出かけ情報を紹介します。"
+  title={`今日の東京イベント（${today}）| Seekigo`}
+  description={`${todayLabel}に東京で開催されるイベント・お祭り・展示・グルメ・お出かけ情報を紹介します。`}
 >
   <main>
-    <p>
-      <a href="/tokyo/">東京イベントTOP</a>
-    </p>
 
-    <header>
-      <h1>東京の今日のイベント</h1>
-      <p>{today}</p>
-    </header>
+    <!-- ─── Page Header ─── -->
+    <section class="page-header">
+      <div class="inner">
+        <nav class="breadcrumb" aria-label="パンくず">
+          <a href="/tokyo/">東京のイベント</a>
+          <span aria-hidden="true">›</span>
+          <span aria-current="page">今日</span>
+        </nav>
 
-    <section>
-      <h2>今日のイベント</h2>
-
-      {events && events.length > 0 ? (
-        <div>
-          {events.map((event) => (
-            <EventCard event={event} />
-          ))}
-        </div>
-      ) : (
-        <p>現在掲載中のイベントはありません。</p>
-      )}
+        <h1 class="page-header__title">今日の東京イベント</h1>
+        <p class="page-header__date">{todayLabel}</p>
+      </div>
     </section>
+
+    <!-- ─── Events ─── -->
+    <section class="events">
+      <div class="inner">
+        {events && events.length > 0 ? (
+          <>
+            <p class="events__count">{events.length}件のイベントが開催中</p>
+            <div class="card-grid">
+              {events.map((event) => (
+                <EventCard event={event} />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div class="empty-state">
+            <p class="empty-state__main">今日開催のイベントは現在ありません。</p>
+            <a href="/tokyo/" class="empty-state__link">すべてのイベントを見る →</a>
+          </div>
+        )}
+      </div>
+    </section>
+
   </main>
 </Layout>
+
+<style>
+  /* ─── Page Header ─── */
+  .page-header {
+    background: var(--c-white);
+    border-bottom: 1px solid var(--c-border);
+    padding: 32px 0 28px;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--c-muted);
+    margin-bottom: 16px;
+  }
+  .breadcrumb a {
+    color: var(--c-primary);
+  }
+  .breadcrumb a:hover { text-decoration: underline; }
+
+  .page-header__title {
+    font-size: clamp(24px, 5vw, 36px);
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--c-text);
+  }
+  .page-header__date {
+    font-size: 14px;
+    color: var(--c-muted);
+    margin-top: 6px;
+  }
+
+  /* ─── Events ─── */
+  .events {
+    padding: 40px 0 0;
+  }
+  .events__count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--c-muted);
+    margin-bottom: 20px;
+  }
+
+  /* ─── Card Grid ─── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  /* ─── Empty State ─── */
+  .empty-state {
+    padding: 64px 0;
+    text-align: center;
+  }
+  .empty-state__main {
+    font-size: 16px;
+    color: var(--c-muted);
+    margin-bottom: 20px;
+  }
+  .empty-state__link {
+    display: inline-block;
+    background: var(--c-primary);
+    color: var(--c-white) !important;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 24px;
+    border-radius: var(--r-lg);
+    transition: background 0.15s;
+  }
+  .empty-state__link:hover {
+    background: var(--c-primary-dk);
+  }
+</style>

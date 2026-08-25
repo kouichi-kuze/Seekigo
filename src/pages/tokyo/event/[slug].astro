@@ -1,133 +1,387 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
-import { getEventBySlug, getPublishedEvents } from '../../../lib/events'
+import { supabase } from '../../../lib/supabase'
 
 export async function getStaticPaths() {
-  const events = await getPublishedEvents()
+  const { data: events } = await supabase
+    .from('events')
+    .select('slug')
+    .eq('status', 'published')
+    .not('slug', 'is', null)
 
-  return events
-    .filter((event) => typeof event.slug === 'string' && event.slug.length > 0)
-    .map((event) => ({
-      params: { slug: event.slug as string },
-    }))
+  return (events ?? []).map((event) => ({
+    params: { slug: event.slug as string },
+  }))
 }
 
-const slug = Astro.params.slug
+const { slug } = Astro.params
 
-if (!slug) {
-  return Astro.rewrite('/404')
-}
+const { data: event } = await supabase
+  .from('events')
+  .select('*')
+  .eq('slug', slug)
+  .eq('status', 'published')
+  .single()
 
-const event = await getEventBySlug(slug)
+const dateLabel = (() => {
+  if (!event?.start_date) return null
+  if (event.end_date && event.end_date !== event.start_date) {
+    return `${event.start_date} ～ ${event.end_date}`
+  }
+  return event.start_date
+})()
 
-if (!event) {
-  return Astro.rewrite('/404')
-}
+const timeLabel = (() => {
+  if (!event) return null
+  const start = event.start_time?.trim() || null
+  const end = event.end_time?.trim() || null
+  if (!start && !end) return null
+  if (start && end) return `${start} ～ ${end}`
+  return start ?? end
+})()
 
-const dateLabel =
-  event.start_date &&
-  event.end_date &&
-  event.end_date !== event.start_date
-    ? `${event.start_date} ～ ${event.end_date}`
-    : event.start_date
+const hasTags = Boolean(
+  event && (event.is_free || event.is_kids || event.is_indoor || event.is_night),
+)
 
-const timeLabel =
-  event.start_time || event.end_time
-    ? [event.start_time, event.end_time].filter(Boolean).join(' ～ ')
-    : null
-
-const categoryLabel = Array.isArray(event.category)
-  ? event.category.filter(Boolean).join('、')
-  : event.category
+const hasMeta = Boolean(
+  event &&
+    (dateLabel ||
+      timeLabel ||
+      event.venue ||
+      event.area ||
+      event.address ||
+      event.price_text),
+)
 ---
 
 <Layout
-  title={`${event.title} | 東京イベント | Seekigo`}
-  description={event.summary ?? undefined}
+  title={event ? `${event.title} | Seekigo` : 'Seekigo'}
+  description={
+    event?.summary ??
+    `${event?.title ?? ''}の詳細情報。東京のイベント・お出かけ情報はSeekigoで。`
+  }
 >
-  <main>
-    <p>
-      <a href="/tokyo/">東京イベントTOP</a>
-    </p>
+  {event ? (
+    <main class="event-page">
+      <article class="event-article">
+        <nav class="breadcrumb" aria-label="パンくず">
+          <a href="/tokyo/">東京のイベント</a>
+          <span class="breadcrumb__sep" aria-hidden="true">›</span>
+          <span class="breadcrumb__current" aria-current="page">{event.title}</span>
+        </nav>
 
-    <article>
-      <header>
-        <h1>{event.title}</h1>
-      </header>
+        <header class="event-header">
+          {hasTags && (
+            <div class="event-tags">
+              {event.is_free && <span class="tag">無料</span>}
+              {event.is_kids && <span class="tag">子ども向け</span>}
+              {event.is_indoor && <span class="tag">屋内</span>}
+              {event.is_night && <span class="tag">夜</span>}
+            </div>
+          )}
+          {event.area && <p class="event-area">{event.area}</p>}
+          <h1 class="event-title">{event.title}</h1>
+        </header>
 
-      {dateLabel && (
-        <p>
-          <strong>開催日：</strong>
-          {dateLabel}
+        {event.image_url && (
+          <div class="event-image">
+            <img
+              src={event.image_url}
+              alt={event.title}
+              loading="eager"
+              decoding="async"
+            />
+          </div>
+        )}
+
+        {hasMeta && (
+          <dl class="event-meta">
+            {dateLabel && (
+              <div class="event-meta__row">
+                <dt>開催日</dt>
+                <dd>{dateLabel}</dd>
+              </div>
+            )}
+            {timeLabel && (
+              <div class="event-meta__row">
+                <dt>時間</dt>
+                <dd>{timeLabel}</dd>
+              </div>
+            )}
+            {event.venue && (
+              <div class="event-meta__row">
+                <dt>会場</dt>
+                <dd>{event.venue}</dd>
+              </div>
+            )}
+            {event.area && (
+              <div class="event-meta__row">
+                <dt>エリア</dt>
+                <dd>{event.area}</dd>
+              </div>
+            )}
+            {event.address && (
+              <div class="event-meta__row">
+                <dt>住所</dt>
+                <dd>{event.address}</dd>
+              </div>
+            )}
+            {event.price_text && (
+              <div class="event-meta__row">
+                <dt>料金</dt>
+                <dd>{event.price_text}</dd>
+              </div>
+            )}
+          </dl>
+        )}
+
+        {event.summary && (
+          <section class="event-body">
+            <h2 class="event-body__heading">イベント概要</h2>
+            <p class="event-body__text">{event.summary}</p>
+          </section>
+        )}
+
+        {event.official_url && (
+          <div class="event-cta">
+            <a
+              href={event.official_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-primary"
+            >
+              公式サイトで詳細を見る →
+            </a>
+          </div>
+        )}
+
+        {event.source_url && (
+          <p class="event-source">
+            情報元:{' '}
+            <a
+              href={event.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {event.source_url}
+            </a>
+          </p>
+        )}
+
+        <p class="back-link">
+          <a href="/tokyo/">← 東京のイベント一覧に戻る</a>
         </p>
-      )}
-
-      {timeLabel && (
-        <p>
-          <strong>時間：</strong>
-          {timeLabel}
+      </article>
+    </main>
+  ) : (
+    <main class="event-page">
+      <div class="event-article">
+        <p class="not-found">イベントが見つかりませんでした。</p>
+        <p class="back-link">
+          <a href="/tokyo/">← 東京のイベント一覧に戻る</a>
         </p>
-      )}
-
-      {event.venue && (
-        <p>
-          <strong>場所：</strong>
-          {event.venue}
-        </p>
-      )}
-
-      {event.area && (
-        <p>
-          <strong>エリア：</strong>
-          {event.area}
-        </p>
-      )}
-
-      {event.address && (
-        <p>
-          <strong>住所：</strong>
-          {event.address}
-        </p>
-      )}
-
-      {event.price_text && (
-        <p>
-          <strong>料金：</strong>
-          {event.price_text}
-        </p>
-      )}
-
-      {categoryLabel && (
-        <p>
-          <strong>カテゴリ：</strong>
-          {categoryLabel}
-        </p>
-      )}
-
-      {(event.is_free || event.is_kids || event.is_indoor || event.is_night) && (
-        <p>
-          {event.is_free && <span>無料 </span>}
-          {event.is_kids && <span>子ども向け </span>}
-          {event.is_indoor && <span>屋内 </span>}
-          {event.is_night && <span>夜開催 </span>}
-        </p>
-      )}
-
-      {event.summary && (
-        <p>{event.summary}</p>
-      )}
-
-      {event.official_url && (
-        <p>
-          <a
-            href={event.official_url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            公式サイトを見る
-          </a>
-        </p>
-      )}
-    </article>
-  </main>
+      </div>
+    </main>
+  )}
 </Layout>
+
+<style>
+  .event-page {
+    padding-bottom: 80px;
+  }
+
+  .event-article {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px var(--px) 0;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* Breadcrumb — 控えめ */
+  .breadcrumb {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--c-muted);
+  }
+  .breadcrumb a {
+    color: var(--c-muted);
+  }
+  .breadcrumb a:hover {
+    color: var(--c-primary);
+    text-decoration: underline;
+  }
+  .breadcrumb__sep {
+    color: var(--c-border);
+  }
+  .breadcrumb__current {
+    color: var(--c-muted);
+    overflow-wrap: anywhere;
+  }
+
+  /* Header */
+  .event-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .event-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    background: var(--c-accent);
+    color: var(--c-text);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: var(--r-sm);
+    letter-spacing: 0.02em;
+  }
+  .event-area {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--c-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .event-title {
+    font-size: clamp(22px, 5vw, 40px);
+    font-weight: 800;
+    letter-spacing: -0.4px;
+    line-height: 1.3;
+    color: var(--c-text);
+    overflow-wrap: anywhere;
+  }
+
+  /* Image — ある場合のみ */
+  .event-image {
+    border-radius: var(--r-md);
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    background: var(--c-border);
+  }
+  .event-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* Meta — 軽い区切り（強い表にしない） */
+  .event-meta {
+    margin: 0;
+    border-top: 1px solid var(--c-border);
+  }
+  .event-meta__row {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--c-border);
+    align-items: start;
+  }
+  .event-meta__row dt {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--c-muted);
+  }
+  .event-meta__row dd {
+    margin: 0;
+    font-size: 14px;
+    color: var(--c-text);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  /* 概要 */
+  .event-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .event-body__heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--c-text);
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--c-primary);
+    align-self: flex-start;
+  }
+  .event-body__text {
+    font-size: 15px;
+    line-height: 1.85;
+    color: var(--c-text);
+    white-space: pre-wrap;
+  }
+
+  /* 主要 CTA */
+  .event-cta {
+    padding-top: 4px;
+  }
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: var(--c-primary);
+    color: var(--c-white) !important;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 14px 24px;
+    border-radius: var(--r-lg);
+    text-align: center;
+    transition: background 0.15s;
+  }
+  .btn-primary:hover {
+    background: var(--c-primary-dk);
+  }
+
+  /* 情報元 — 補助的 */
+  .event-source {
+    font-size: 12px;
+    color: var(--c-muted);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    margin-top: -8px;
+  }
+  .event-source a {
+    color: var(--c-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .event-source a:hover {
+    color: var(--c-primary);
+  }
+
+  .back-link {
+    font-size: 14px;
+    padding-top: 8px;
+  }
+  .back-link a {
+    color: var(--c-muted);
+  }
+  .back-link a:hover {
+    color: var(--c-text);
+  }
+
+  .not-found {
+    color: var(--c-muted);
+  }
+
+  @media (min-width: 640px) {
+    .btn-primary {
+      width: auto;
+      min-width: 280px;
+    }
+  }
+</style>
