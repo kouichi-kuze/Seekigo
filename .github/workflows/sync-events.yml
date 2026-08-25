@@ -69,8 +69,25 @@ jobs:
           trap 'rm -f ~/.ssh/id_ed25519' EXIT
 
           # known_hosts（ホスト鍵検証を有効にするため先に登録）
-          ssh-keyscan -p "$XSERVER_PORT" -H "$XSERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Host / User / Secret の値そのものはログに出さない
+          echo "Scanning Xserver SSH host key..."
+          : > ~/.ssh/known_hosts
+          set +e
+          ssh-keyscan -T 10 -p "$XSERVER_PORT" -H "$XSERVER_HOST" >> ~/.ssh/known_hosts
+          keyscan_status=$?
+          set -e
+          if [ "$keyscan_status" -ne 0 ]; then
+            echo "ERROR: ssh-keyscan failed (exit ${keyscan_status})."
+            echo "ERROR: Check XSERVER_HOST / XSERVER_PORT (Xserver SSH is usually 10022) and network access."
+            exit 1
+          fi
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "ERROR: ssh-keyscan returned success but known_hosts is empty."
+            echo "ERROR: Host key was not retrieved. Check XSERVER_HOST / XSERVER_PORT (Xserver SSH is usually 10022)."
+            exit 1
+          fi
           chmod 644 ~/.ssh/known_hosts
+          echo "Host key scan OK (known_hosts written)."
 
           SSH_OPTS=(
             -i ~/.ssh/id_ed25519
