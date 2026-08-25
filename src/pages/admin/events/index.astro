@@ -1,21 +1,10 @@
 ---
 /**
- * 開発用 Draft 承認画面。
- * - production では middleware で 404（このページは DEV 専用）
- * - Service Role は server のみ（createAdminClient）
- * - 将来の認証は middleware / この frontmatter 先頭に追加する
+ * 開発用 Draft 承認画面（astro dev 専用）。
+ * - static build / 本番では Service Role を import せず 404 のみ出力
+ * - Service Role は DEV 時のみ動的 import（createAdminClient）
  */
-export const prerender = false
-
-import { createAdminClient } from '../../../lib/supabase-admin'
-import {
-  getOrCreateAdminCsrfToken,
-  parsePositiveIntIds,
-  verifyAdminCsrf,
-} from '../../../lib/admin-security'
-
-// 二重ガード（middleware 以外からも production を拒否）
-if (import.meta.env.PROD) {
+if (!import.meta.env.DEV) {
   return new Response('Not Found', {
     status: 404,
     headers: {
@@ -24,6 +13,13 @@ if (import.meta.env.PROD) {
     },
   })
 }
+
+const { createAdminClient } = await import('../../../lib/supabase-admin')
+const {
+  getOrCreateAdminCsrfToken,
+  parsePositiveIntIds,
+  verifyAdminCsrf,
+} = await import('../../../lib/admin-security')
 
 type AdminEvent = {
   id: number | string
@@ -173,7 +169,7 @@ try {
   <body>
     <main class="admin">
       <p class="dev-banner">
-        DEV ONLY — 開発用の簡易承認画面です。認証未実装のため本番では公開しません（middleware で 404）。
+        DEV ONLY — ローカル astro dev 専用です。本番 dist / Xserver には管理機能を含めません。
       </p>
 
       <header>

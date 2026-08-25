@@ -2,10 +2,13 @@ import { defineMiddleware } from 'astro:middleware'
 
 /**
  * /admin 配下のゲート。
- * - production: 404（ルートはコード上残すが公開しない）
- * - development: 通過（将来ここに認証を追加する）
+ * - astro dev のみ通過（ローカル管理画面）
+ * - build / preview / 本番相当では 404
  *
- * 認証追加時の想定:
+ * 静的ホスト（Xserver）では middleware はリクエスト時に動かないが、
+ * build 時のガードと preview 用に残す。
+ *
+ * 認証追加時の想定（DEV）:
  * 1. session / cookie 検証
  * 2. 未ログインなら 401/302
  * 3. 通った場合のみ next()
@@ -17,8 +20,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return next()
   }
 
-  // production では管理画面を公開しない
-  if (import.meta.env.PROD) {
+  // ローカル astro dev 以外では管理画面を使わない
+  if (!import.meta.env.DEV) {
     return new Response('Not Found', {
       status: 404,
       statusText: 'Not Found',

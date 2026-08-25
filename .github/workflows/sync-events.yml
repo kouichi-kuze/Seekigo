@@ -32,3 +32,65 @@ jobs:
           PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      # 公開サイトは完全 SSG。Service Role / OpenAI は渡さない
+      - name: Build static site
+        run: npm run build
+        env:
+          PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seekigo-dist
+          path: dist
+          if-no-files-found: error
+
+      # sync / build が成功したときのみ実行（前 step 失敗でここに到達しない）
+      # Xserver SSH ポートは公式どおり 10022（Secret: XSERVER_PORT=10022）
+      - name: Deploy dist to Xserver
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_DEPLOY_PATH: ${{ secrets.XSERVER_DEPLOY_PATH }}
+          XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # 秘密鍵をファイルへ（ログへ出力しない・終了時に削除）
+          umask 077
+          printf '%s\n' "$XSERVER_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          trap 'rm -f ~/.ssh/id_ed25519' EXIT
+
+          # known_hosts（ホスト鍵検証を有効にするため先に登録）
+          ssh-keyscan -p "$XSERVER_PORT" -H "$XSERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+
+          SSH_OPTS=(
+            -i ~/.ssh/id_ed25519
+            -p "$XSERVER_PORT"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+          )
+
+          echo "Checking SSH connection…"
+          ssh "${SSH_OPTS[@]}" \
+            "${XSERVER_USER}@${XSERVER_HOST}" \
+            'test -d '"$XSERVER_DEPLOY_PATH"' && echo ssh_ok'
+
+          echo "Deploying dist/ (rsync, no --delete)…"
+          # trailing slash: dist/ の中身をデプロイ先ディレクトリへ配置
+          rsync -az \
+            --exclude '.git' \
+            -e "ssh -i ~/.ssh/id_ed25519 -p ${XSERVER_PORT} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+            dist/ \
+            "${XSERVER_USER}@${XSERVER_HOST}:${XSERVER_DEPLOY_PATH}"
+
+          echo "Deploy finished"

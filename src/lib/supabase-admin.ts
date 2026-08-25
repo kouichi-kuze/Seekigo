@@ -2,7 +2,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 /**
  * サーバー専用 Supabase クライアント（Service Role）。
- * ブラウザ・PUBLIC_ 付きキーでは使わないこと。
+ * - ブラウザ・PUBLIC_ 付きキーでは使わない
+ * - 公開サイトの static build / dist では import しない（admin は DEV 動的 import のみ）
  */
 export function createAdminClient(): SupabaseClient {
   const url = import.meta.env.PUBLIC_SUPABASE_URL

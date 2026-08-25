@@ -23,7 +23,6 @@
     "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts"
   },
   "dependencies": {
-    "@astrojs/node": "^11.1.4",
     "@supabase/supabase-js": "^2.112.4",
     "astro": "^7.2.4",
     "cheerio": "^1.2.0",
