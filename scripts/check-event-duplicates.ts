@@ -12,6 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
+  formatDedupeLog,
   matchAgainstExisting,
   type DedupeExisting,
   type DuplicateMatchResult,
@@ -32,6 +33,7 @@ type EnjoyDetail = {
   start_date: string | null
   end_date: string | null
   venue: string | null
+  area?: string | null
   official_url: string | null
   source_url: string | null
   error?: string | null
@@ -79,7 +81,7 @@ async function fetchExistingEvents(
   const { data, error } = await supabase
     .from('events')
     .select(
-      'id, slug, title, start_date, end_date, venue, official_url, source_url, status',
+      'id, slug, title, start_date, end_date, venue, area, official_url, source_url, status',
     )
     .order('start_date', { ascending: true })
 
@@ -87,36 +89,48 @@ async function fetchExistingEvents(
     throw new Error(`Failed to fetch public.events: ${error.message}`)
   }
 
-  return (data ?? []).map((row) => ({
-    id: row.id ?? null,
-    slug: String(row.slug),
-    title: row.title ?? null,
-    start_date: row.start_date ?? null,
-    end_date: row.end_date ?? null,
-    venue: row.venue ?? null,
-    official_url: row.official_url ?? null,
-    source_url: row.source_url ?? null,
-    status: row.status ?? null,
-  }))
+  const { data: sources, error: srcErr } = await supabase
+    .from('event_sources')
+    .select('event_id, source_url')
+
+  if (srcErr) {
+    throw new Error(`Failed to fetch event_sources: ${srcErr.message}`)
+  }
+
+  const alts = new Map<number, string[]>()
+  for (const s of sources ?? []) {
+    const id = Number(s.event_id)
+    if (!Number.isFinite(id) || !s.source_url) continue
+    const list = alts.get(id) ?? []
+    list.push(String(s.source_url))
+    alts.set(id, list)
+  }
+
+  return (data ?? []).map((row) => {
+    const id = Number(row.id)
+    return {
+      id: row.id ?? null,
+      slug: String(row.slug),
+      title: row.title ?? null,
+      start_date: row.start_date ?? null,
+      end_date: row.end_date ?? null,
+      venue: row.venue ?? null,
+      area: row.area ?? null,
+      official_url: row.official_url ?? null,
+      source_url: row.source_url ?? null,
+      status: row.status ?? null,
+      alternate_source_urls: Number.isFinite(id) ? (alts.get(id) ?? []) : [],
+    }
+  })
 }
 
 function logRow(row: DedupeRow) {
-  console.log(`[dedupe:enjoytokyo] ---- ${row.index} ----`)
-  console.log(`[dedupe:enjoytokyo] title: ${row.title}`)
-  console.log(`[dedupe:enjoytokyo] source_url: ${row.source_url}`)
-  console.log(`[dedupe:enjoytokyo] duplicate_status: ${row.duplicate_status}`)
-  console.log(
-    `[dedupe:enjoytokyo] matched_event_slug: ${row.matched_event_slug ?? 'null'}`,
-  )
-  console.log(`[dedupe:enjoytokyo] confidence: ${row.confidence}`)
-  console.log(`[dedupe:enjoytokyo] reason: ${row.duplicate_reason}`)
-  if (row.matched_title) {
-    console.log(`[dedupe:enjoytokyo] matched_title: ${row.matched_title}`)
-  }
-  if (row.scores) {
-    console.log(
-      `[dedupe:enjoytokyo] scores: title=${row.scores.title_similarity} date=${row.scores.date_overlap_ratio} venue=${row.scores.venue_similarity}`,
-    )
+  for (const line of formatDedupeLog({
+    status: row.duplicate_status,
+    incomingTitle: row.title,
+    match: row,
+  })) {
+    console.log(`[dedupe:enjoytokyo] ${line}`)
   }
 }
 
@@ -168,6 +182,7 @@ async function main() {
         start_date: c.start_date,
         end_date: c.end_date,
         venue: c.venue,
+        area: c.area ?? null,
         official_url: c.official_url,
         source_url: c.source_url,
       },
@@ -206,7 +221,9 @@ async function main() {
     }
     console.log(
       `[dedupe:enjoytokyo] WATCH: "${hit.title}" => ${hit.duplicate_status}` +
-        ` slug=${hit.matched_event_slug ?? 'null'} confidence=${hit.confidence}`,
+        ` id=${hit.matched_event_id ?? 'null'}` +
+        ` slug=${hit.matched_event_slug ?? 'null'} confidence=${hit.confidence}` +
+        ` action=${hit.recommended_action}`,
     )
   }
 

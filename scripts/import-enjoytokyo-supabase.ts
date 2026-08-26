@@ -19,12 +19,28 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from 'dotenv'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { DuplicateStatus } from '../src/lib/event-dedupe'
+import type { DuplicateMatchResult, DuplicateStatus } from '../src/lib/event-dedupe'
+import { formatDedupeLog } from '../src/lib/event-dedupe'
+import {
+  cleanAddressAccess,
+  inferIsFreeFromPriceText,
+  resolveAreaSlug,
+} from '../src/lib/event-field-rules'
+import {
+  ensureEventSource,
+  extractEnjoytokyoEventId,
+  type AttachResult,
+} from './lib/event-sources'
+import {
+  buildIncomingPayload,
+  upsertDedupeReview,
+} from './lib/dedupe-reviews'
 
 config()
 
 const DRY_RUN = process.env.DRY_RUN !== 'false'
 const SOURCE_NAME = 'enjoytokyo' as const
+const LOG = '[import-enjoytokyo]'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
@@ -58,8 +74,14 @@ type DedupeResult = {
   source_url: string | null
   duplicate_status: DuplicateStatus
   matched_event_slug: string | null
+  matched_event_id?: string | number | null
+  matched_title?: string | null
+  matched_status?: string | null
   duplicate_reason: string
   confidence: number
+  recommended_action?: DuplicateMatchResult['recommended_action']
+  scores?: DuplicateMatchResult['scores']
+  review_payload?: DuplicateMatchResult['review_payload']
 }
 
 type DedupeFile = {
@@ -78,17 +100,6 @@ type Summary = {
   skipped: number
   failed: number
 }
-
-type SourceRow = {
-  event_id: number
-  source_name: typeof SOURCE_NAME
-  source_url: string
-  source_event_id: string | null
-  official_url: string | null
-  last_checked_at: string
-}
-
-type AttachResult = 'new_source' | 'already_attached'
 
 function isBlank(value: unknown): boolean {
   return value === null || value === undefined || value === ''
@@ -123,14 +134,6 @@ function createServiceClient(): SupabaseClient {
   })
 }
 
-function extractEnjoytokyoEventId(
-  sourceUrl: string | null | undefined,
-): string | null {
-  if (!sourceUrl) return null
-  const m = sourceUrl.match(/\/event\/(\d+)\/?/i)
-  return m?.[1] ?? null
-}
-
 function generateEnjoytokyoSlug(
   title: string,
   startDate: string,
@@ -156,6 +159,21 @@ function normalizeArea(area: unknown): string | null {
   if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null
   if (!/^[a-z0-9-]+$/.test(trimmed)) return null
   return trimmed
+}
+
+/** 日本語 area / address / venue から slug を決定（AI より優先） */
+function resolveImportArea(detail: {
+  area?: string | null
+  address?: string | null
+  venue?: string | null
+}): string | null {
+  return (
+    resolveAreaSlug({
+      areaHint: detail.area,
+      address: detail.address,
+      venue: detail.venue,
+    }) ?? normalizeArea(detail.area)
+  )
 }
 
 function summaryFromDescription(
@@ -229,6 +247,16 @@ function validateNewDraft(
     detail.source_url,
   )
 
+  const address =
+    cleanAddressAccess(detail.address) ??
+    (typeof detail.address === 'string' ? detail.address.trim() || null : null)
+  const area = resolveImportArea({
+    area: detail.area,
+    address,
+    venue: detail.venue,
+  })
+  const is_free = inferIsFreeFromPriceText(detail.price_text)
+
   return {
     ok: true,
     sourceEventId: extractEnjoytokyoEventId(detail.source_url),
@@ -238,14 +266,14 @@ function validateNewDraft(
       official_url: detail.official_url ?? null,
       source_url: detail.source_url.trim(),
       venue: detail.venue ?? null,
-      area: normalizeArea(detail.area),
-      address: detail.address ?? null,
+      area,
+      address,
       start_date: detail.start_date,
       end_date: detail.end_date ?? null,
       start_time: detail.start_time ?? null,
       end_time: detail.end_time ?? null,
       price_text: detail.price_text ?? null,
-      is_free: null,
+      is_free,
       is_indoor: null,
       is_kids: null,
       is_night: null,
@@ -263,57 +291,36 @@ function tallyAttach(summary: Summary, result: AttachResult) {
   else summary.already_attached += 1
 }
 
-/**
- * event_sources を冪等に確保する。
- * 既存: INSERT せず last_checked_at 等のみ更新 → already_attached
- * 新規: INSERT → new_source
- */
-async function ensureEventSource(
-  client: SupabaseClient,
-  row: SourceRow,
-  write: boolean,
-): Promise<AttachResult> {
-  const { data: existing, error: selErr } = await client
-    .from('event_sources')
-    .select('id')
-    .eq('event_id', row.event_id)
-    .eq('source_name', row.source_name)
-    .eq('source_url', row.source_url)
-    .maybeSingle()
-
-  if (selErr) throw selErr
-
-  if (existing) {
-    console.log(
-      `[import-enjoytokyo] source already attached: event_id=${row.event_id}`,
-    )
-    if (write) {
-      const { error: updErr } = await client
-        .from('event_sources')
-        .update({
-          source_event_id: row.source_event_id,
-          official_url: row.official_url,
-          last_checked_at: row.last_checked_at,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id)
-      if (updErr) throw updErr
-    }
-    return 'already_attached'
+function toMatchResult(item: DedupeResult): DuplicateMatchResult {
+  return {
+    duplicate_status: item.duplicate_status,
+    matched_event_slug: item.matched_event_slug,
+    matched_event_id: item.matched_event_id ?? null,
+    matched_title: item.matched_title,
+    matched_status: item.matched_status,
+    duplicate_reason: item.duplicate_reason,
+    confidence: item.confidence,
+    recommended_action:
+      item.recommended_action ??
+      (item.duplicate_status === 'exact'
+        ? 'attach_source_only'
+        : item.duplicate_status === 'none'
+          ? 'create_draft'
+          : 'review_required'),
+    scores: item.scores,
+    review_payload: item.review_payload,
   }
+}
 
-  if (write) {
-    const { error: insErr } = await client.from('event_sources').insert(row)
-    if (insErr) throw insErr
-    console.log(
-      `[import-enjoytokyo] new source attached: event_id=${row.event_id}`,
-    )
-  } else {
-    console.log(
-      `[import-enjoytokyo] would attach new source: event_id=${row.event_id}`,
-    )
+function logDedupeItem(item: DedupeResult, action?: string) {
+  for (const line of formatDedupeLog({
+    status: item.duplicate_status,
+    incomingTitle: item.title,
+    match: toMatchResult(item),
+    action,
+  })) {
+    console.log(`${LOG} ${line}`)
   }
-  return 'new_source'
 }
 
 /** draft のみ本体更新。published は呼ばないこと。 */
@@ -322,25 +329,30 @@ async function updateDraftBody(
   eventId: number,
   row: NewEventRow,
 ): Promise<void> {
+  const patch: Record<string, unknown> = {
+    title: row.title,
+    official_url: row.official_url,
+    source_url: row.source_url,
+    venue: row.venue,
+    address: row.address,
+    start_date: row.start_date,
+    end_date: row.end_date,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    price_text: row.price_text,
+    image_url: row.image_url,
+    // AI 未実行の summary は description 由来。既存 AI summary を潰さないよう summary は触らない
+    last_checked_at: row.last_checked_at,
+    updated_at: new Date().toISOString(),
+  }
+
+  // deterministic で取れた場合のみ area / is_free を更新（null で AI 結果を消さない）
+  if (row.area) patch.area = row.area
+  if (row.is_free !== null) patch.is_free = row.is_free
+
   const { error } = await supabase
     .from('events')
-    .update({
-      title: row.title,
-      official_url: row.official_url,
-      source_url: row.source_url,
-      venue: row.venue,
-      area: row.area,
-      address: row.address,
-      start_date: row.start_date,
-      end_date: row.end_date,
-      start_time: row.start_time,
-      end_time: row.end_time,
-      price_text: row.price_text,
-      image_url: row.image_url,
-      // AI 未実行の summary は description 由来。既存 AI summary を潰さないよう summary は触らない
-      last_checked_at: row.last_checked_at,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq('id', eventId)
     .eq('status', 'draft')
 
@@ -348,11 +360,11 @@ async function updateDraftBody(
 }
 
 async function main() {
-  console.log('[import-enjoytokyo] start')
-  console.log(`[import-enjoytokyo] DRY_RUN: ${DRY_RUN}`)
-  console.log('[import-enjoytokyo] AI: unused')
+  console.log(`${LOG} start`)
+  console.log(`${LOG} DRY_RUN: ${DRY_RUN}`)
+  console.log(`${LOG} AI: unused`)
   console.log(
-    '[import-enjoytokyo] published bodies are never overwritten; event_sources is idempotent',
+    `${LOG} published bodies are never overwritten; event_sources is idempotent`,
   )
 
   let dedupeFile: DedupeFile
@@ -361,7 +373,7 @@ async function main() {
     dedupeFile = JSON.parse(await readFile(dedupePath, 'utf8')) as DedupeFile
   } catch (error) {
     console.error(
-      '[import-enjoytokyo] failed to read tmp/enjoytokyo-dedupe-results.json — run `npm run dedupe:enjoytokyo` first',
+      `${LOG} failed to read tmp/enjoytokyo-dedupe-results.json — run \`npm run dedupe:enjoytokyo\` first`,
       error,
     )
     process.exit(1)
@@ -371,7 +383,7 @@ async function main() {
     detailsFile = JSON.parse(await readFile(detailsPath, 'utf8')) as DetailsFile
   } catch (error) {
     console.error(
-      '[import-enjoytokyo] failed to read tmp/enjoytokyo-event-details.json — run `npm run fetch:enjoytokyo:details` first',
+      `${LOG} failed to read tmp/enjoytokyo-event-details.json — run \`npm run fetch:enjoytokyo:details\` first`,
       error,
     )
     process.exit(1)
@@ -379,7 +391,7 @@ async function main() {
 
   const results = dedupeFile.results ?? []
   if (results.length === 0) {
-    console.error('[import-enjoytokyo] no results in dedupe JSON')
+    console.error(`${LOG} no results in dedupe JSON`)
     process.exit(1)
   }
 
@@ -397,10 +409,10 @@ async function main() {
 
   if (DRY_RUN) {
     console.log(
-      '[import-enjoytokyo] dry-run mode — no DB writes (set DRY_RUN=false to write)',
+      `${LOG} dry-run mode — no DB writes (set DRY_RUN=false to write)`,
     )
   } else {
-    console.log('[import-enjoytokyo] using SUPABASE_SERVICE_ROLE_KEY for writes')
+    console.log(`${LOG} using SUPABASE_SERVICE_ROLE_KEY for writes`)
   }
 
   const summary: Summary = {
@@ -419,36 +431,77 @@ async function main() {
 
     if (!item.source_url) {
       summary.skipped += 1
-      console.log(`[import-enjoytokyo] ---- ${label} (skipped) ----`)
-      console.log('[import-enjoytokyo] reason: missing source_url')
+      console.log(`${LOG} ---- ${label} (skipped) ----`)
+      console.log(`${LOG} reason: missing source_url`)
       continue
     }
 
     if (!detail || detail.error) {
       summary.skipped += 1
-      console.log(`[import-enjoytokyo] ---- ${label} (skipped) ----`)
+      console.log(`${LOG} ---- ${label} (skipped) ----`)
       console.log(
-        `[import-enjoytokyo] reason: detail missing or error for ${item.source_url}`,
+        `${LOG} reason: detail missing or error for ${item.source_url}`,
       )
       continue
     }
 
     const status = item.duplicate_status
+    console.log(`${LOG} ---- ${label} ----`)
 
     if (status === 'likely' || status === 'ambiguous') {
       summary.review_required += 1
-      console.log(`[import-enjoytokyo] ${status} -> review required`)
-      console.log(`[import-enjoytokyo] ---- ${label} ----`)
-      console.log(`[import-enjoytokyo] title: ${item.title}`)
-      console.log(
-        `[import-enjoytokyo] matched_event_slug: ${item.matched_event_slug}`,
-      )
-      console.log(`[import-enjoytokyo] reason: ${item.duplicate_reason}`)
-      console.log(`[import-enjoytokyo] confidence: ${item.confidence}`)
+      logDedupeItem(item, 'review_required')
+
+      if (readClient) {
+        const rawCandidate = Number(item.matched_event_id)
+        const candidateId =
+          Number.isFinite(rawCandidate) && rawCandidate > 0
+            ? rawCandidate
+            : null
+        try {
+          await upsertDedupeReview(
+            readClient,
+            {
+              incoming_source_name: SOURCE_NAME,
+              incoming_source_url: detail.source_url!,
+              incoming_payload: buildIncomingPayload({
+                sourceName: SOURCE_NAME,
+                title: detail.title,
+                start_date: detail.start_date,
+                end_date: detail.end_date,
+                start_time: detail.start_time ?? null,
+                end_time: detail.end_time ?? null,
+                venue: detail.venue,
+                area: detail.area ?? null,
+                official_url: detail.official_url,
+                source_url: detail.source_url,
+                price_text: detail.price_text ?? null,
+                is_free: inferIsFreeFromPriceText(detail.price_text),
+                address: detail.address ?? null,
+                category: null,
+                summary: summaryFromDescription(detail.description),
+                image_url: detail.image_url ?? null,
+              }),
+              candidate_event_id: candidateId,
+              duplicate_status: status,
+              reason: item.duplicate_reason,
+              scores: item.scores ?? null,
+            },
+            Boolean(writeClient),
+            LOG,
+          )
+        } catch (error) {
+          summary.failed += 1
+          const message = error instanceof Error ? error.message : String(error)
+          console.error(`${LOG} review upsert failed: ${message}`)
+        }
+      } else {
+        console.log(`${LOG} review not saved (missing DB client)`)
+      }
       continue
     }
 
-    const sourcePayload = (eventId: number): SourceRow => ({
+    const sourcePayload = (eventId: number) => ({
       event_id: eventId,
       source_name: SOURCE_NAME,
       source_url: detail.source_url!,
@@ -458,90 +511,101 @@ async function main() {
     })
 
     if (status === 'exact') {
-      console.log('[import-enjoytokyo] exact -> attach source (body untouched)')
-      console.log(`[import-enjoytokyo] ---- ${label} ----`)
-      console.log(`[import-enjoytokyo] title: ${item.title}`)
-      console.log(
-        `[import-enjoytokyo] matched_event_slug: ${item.matched_event_slug}`,
-      )
+      logDedupeItem(item, 'attach_source_only')
 
-      if (!item.matched_event_slug) {
+      if (!item.matched_event_slug && item.matched_event_id == null) {
         summary.failed += 1
-        console.error('[import-enjoytokyo] exact but matched_event_slug is null')
+        console.error(`${LOG} exact but matched_event_slug/id is null`)
         continue
       }
 
       if (!readClient) {
         summary.skipped += 1
         console.log(
-          `[import-enjoytokyo] would attach to slug=${item.matched_event_slug} (no DB client)`,
+          `${LOG} would attach to slug=${item.matched_event_slug} (no DB client)`,
         )
         continue
       }
 
       try {
-        const { data: existing, error } = await readClient
-          .from('events')
-          .select('id, slug, status')
-          .eq('slug', item.matched_event_slug)
-          .maybeSingle()
+        let existing:
+          | { id: number | string; slug: string; status: string | null }
+          | null = null
 
-        if (error) throw error
+        if (item.matched_event_id != null) {
+          const { data, error } = await readClient
+            .from('events')
+            .select('id, slug, status')
+            .eq('id', item.matched_event_id)
+            .maybeSingle()
+          if (error) throw error
+          existing = data
+        }
+
+        if (!existing && item.matched_event_slug) {
+          const { data, error } = await readClient
+            .from('events')
+            .select('id, slug, status')
+            .eq('slug', item.matched_event_slug)
+            .maybeSingle()
+          if (error) throw error
+          existing = data
+        }
+
         if (!existing) {
           summary.failed += 1
           console.error(
-            `[import-enjoytokyo] matched slug not found: ${item.matched_event_slug}`,
+            `${LOG} matched event not found: id=${item.matched_event_id} slug=${item.matched_event_slug}`,
           )
           continue
         }
 
         const eventId = Number(existing.id)
         console.log(
-          `[import-enjoytokyo] existing event_id=${eventId} status=${existing.status} (published/draft body not overwritten)`,
+          `${LOG} existing event_id=${eventId} status=${existing.status} (published/draft body not overwritten)`,
         )
 
         const result = await ensureEventSource(
           writeClient ?? readClient,
           sourcePayload(eventId),
           Boolean(writeClient),
+          LOG,
         )
         tallyAttach(summary, result)
       } catch (error) {
         summary.failed += 1
         const message = error instanceof Error ? error.message : String(error)
-        console.error(`[import-enjoytokyo] exact attach failed: ${message}`)
+        console.error(`${LOG} exact attach failed: ${message}`)
       }
       continue
     }
 
     if (status === 'none') {
-      console.log('[import-enjoytokyo] none -> new draft or existing slug')
-      console.log(`[import-enjoytokyo] ---- ${label} ----`)
+      logDedupeItem(item, 'create_draft')
 
       const validated = validateNewDraft(detail)
       if (!validated.ok) {
         summary.skipped += 1
-        console.log(`[import-enjoytokyo] skipped: ${validated.reason}`)
-        console.log(`[import-enjoytokyo] title: ${detail.title}`)
+        console.log(`${LOG} skipped: ${validated.reason}`)
+        console.log(`${LOG} title: ${detail.title}`)
         continue
       }
 
-      console.log(`[import-enjoytokyo] title: ${validated.row.title}`)
-      console.log(`[import-enjoytokyo] slug: ${validated.row.slug}`)
+      console.log(`${LOG} slug: ${validated.row.slug}`)
       console.log(
-        `[import-enjoytokyo] dates: ${validated.row.start_date} ~ ${validated.row.end_date ?? 'null'}`,
+        `${LOG} dates: ${validated.row.start_date} ~ ${validated.row.end_date ?? 'null'}`,
       )
 
       if (!readClient && DRY_RUN) {
         summary.new_events += 1
         summary.new_sources += 1
-        console.log('[import-enjoytokyo] status: draft (planned insert)')
+        console.log(`${LOG} status: draft (planned insert)`)
         continue
       }
 
       if (!readClient) {
         summary.failed += 1
-        console.error('[import-enjoytokyo] no DB client')
+        console.error(`${LOG} no DB client`)
         continue
       }
 
@@ -560,22 +624,20 @@ async function main() {
 
           if (existingStatus === 'published') {
             console.log(
-              `[import-enjoytokyo] published protected id=${eventId} — body not overwritten`,
+              `${LOG} published protected id=${eventId} — body not overwritten`,
             )
           } else if (existingStatus === 'draft') {
             if (writeClient) {
               await updateDraftBody(writeClient, eventId, validated.row)
               console.log(
-                `[import-enjoytokyo] draft updated id=${eventId} (status stays draft)`,
+                `${LOG} draft updated id=${eventId} (status stays draft)`,
               )
             } else {
-              console.log(
-                `[import-enjoytokyo] would update draft id=${eventId}`,
-              )
+              console.log(`${LOG} would update draft id=${eventId}`)
             }
           } else {
             console.log(
-              `[import-enjoytokyo] existing id=${eventId} status=${existingStatus} — body not overwritten`,
+              `${LOG} existing id=${eventId} status=${existingStatus} — body not overwritten`,
             )
           }
 
@@ -583,6 +645,7 @@ async function main() {
             writeClient ?? readClient,
             sourcePayload(eventId),
             Boolean(writeClient),
+            LOG,
           )
           tallyAttach(summary, result)
           continue
@@ -592,7 +655,7 @@ async function main() {
         if (!writeClient) {
           summary.new_events += 1
           summary.new_sources += 1
-          console.log('[import-enjoytokyo] would insert new draft + source')
+          console.log(`${LOG} would insert new draft + source`)
           continue
         }
 
@@ -609,42 +672,39 @@ async function main() {
           writeClient,
           sourcePayload(Number(inserted.id)),
           true,
+          LOG,
         )
         summary.new_events += 1
         tallyAttach(summary, result)
         console.log(
-          `[import-enjoytokyo] insert ok: id=${inserted.id} slug=${validated.row.slug}`,
+          `${LOG} insert ok: id=${inserted.id} slug=${validated.row.slug}`,
         )
       } catch (error) {
         summary.failed += 1
         const message = error instanceof Error ? error.message : String(error)
-        console.error(`[import-enjoytokyo] none-path failed: ${message}`)
+        console.error(`${LOG} none-path failed: ${message}`)
       }
       continue
     }
 
     summary.skipped += 1
-    console.log(`[import-enjoytokyo] ---- ${label} (skipped) ----`)
-    console.log(
-      `[import-enjoytokyo] unknown duplicate_status: ${String(status)}`,
-    )
+    console.log(`${LOG} ---- ${label} (skipped) ----`)
+    console.log(`${LOG} unknown duplicate_status: ${String(status)}`)
   }
 
-  console.log('[import-enjoytokyo] ---- summary ----')
-  console.log(`[import-enjoytokyo] new_events: ${summary.new_events}`)
-  console.log(`[import-enjoytokyo] new_sources: ${summary.new_sources}`)
+  console.log(`${LOG} ---- summary ----`)
+  console.log(`${LOG} new_events: ${summary.new_events}`)
+  console.log(`${LOG} new_sources: ${summary.new_sources}`)
+  console.log(`${LOG} already_attached: ${summary.already_attached}`)
+  console.log(`${LOG} review_required: ${summary.review_required}`)
+  console.log(`${LOG} skipped: ${summary.skipped}`)
+  console.log(`${LOG} failed: ${summary.failed}`)
   console.log(
-    `[import-enjoytokyo] already_attached: ${summary.already_attached}`,
-  )
-  console.log(`[import-enjoytokyo] review_required: ${summary.review_required}`)
-  console.log(`[import-enjoytokyo] skipped: ${summary.skipped}`)
-  console.log(`[import-enjoytokyo] failed: ${summary.failed}`)
-  console.log(
-    `[import-enjoytokyo] done (${DRY_RUN ? 'dry-run, no DB write' : 'write mode'})`,
+    `${LOG} done (${DRY_RUN ? 'dry-run, no DB write' : 'write mode'})`,
   )
 }
 
 main().catch((error) => {
-  console.error('[import-enjoytokyo] unexpected error:', error)
+  console.error(`${LOG} unexpected error:`, error)
   process.exit(1)
 })

@@ -1,14 +1,22 @@
 /**
  * 複数情報源向けのイベント重複判定（ルールベース、AI不使用）。
  *
- * 段階:
+ * 優先順位:
  * 1. exact  — official_url / source_url / (正規化 title + start_date)
- * 2. likely — タイトル類似 + 日付一致or期間重なり + 会場一致or類似
- * 3. ambiguous — タイトルのみ似ている / 会場のみ同じ 等（自動統合しない）
+ * 2. likely — タイトル類似 + 日付 + 会場（+ area）
+ * 3. ambiguous — タイトルのみ似ている等（自動統合しない）
  * 4. none
+ *
+ * 安全性: exact でも本体マージは呼び出し側で禁止すること。
  */
 
 export type DuplicateStatus = 'exact' | 'likely' | 'none' | 'ambiguous'
+
+/** 将来の review UI / import 向け推奨アクション */
+export type DedupeRecommendedAction =
+  | 'attach_source_only'
+  | 'review_required'
+  | 'create_draft'
 
 export type DedupeCandidate = {
   title: string | null
@@ -17,24 +25,56 @@ export type DedupeCandidate = {
   venue: string | null
   official_url: string | null
   source_url: string | null
+  area?: string | null
 }
 
 export type DedupeExisting = DedupeCandidate & {
   slug: string
-  id?: string | null
+  id?: string | number | null
   status?: string | null
+  /**
+   * event_sources 等に紐付く追加 source_url。
+   * 比較時は source_url と合わせて使う。
+   */
+  alternate_source_urls?: string[] | null
+}
+
+export type DuplicateMatchScores = {
+  title_similarity: number
+  date_overlap_ratio: number
+  venue_similarity: number
+  area_match?: boolean | null
 }
 
 export type DuplicateMatchResult = {
   duplicate_status: DuplicateStatus
   matched_event_slug: string | null
+  matched_event_id: string | number | null
   duplicate_reason: string
   confidence: number
   matched_title?: string | null
-  scores?: {
-    title_similarity: number
-    date_overlap_ratio: number
-    venue_similarity: number
+  matched_status?: string | null
+  recommended_action: DedupeRecommendedAction
+  scores?: DuplicateMatchScores
+  /**
+   * 将来の管理画面レビュー用（schema なしでログ/JSON に載せられる構造）
+   */
+  review_payload?: {
+    incoming: DedupeCandidate
+    candidate: {
+      id: string | number | null
+      slug: string
+      title: string | null
+      status: string | null
+      start_date: string | null
+      end_date: string | null
+      venue: string | null
+      area: string | null
+      official_url: string | null
+      source_url: string | null
+    } | null
+    reason: string
+    scores?: DuplicateMatchScores
   }
 }
 
@@ -44,18 +84,56 @@ const VENUE_SIM_HIGH = 0.75
 const VENUE_SIM_AMBIGUOUS = 0.85
 const DATE_OVERLAP_STRONG = 0.5
 
-/** 全角英数・記号を半角へ（NFKC）し、空白を正規化 */
-export function normalizeText(value: string | null | undefined): string {
-  if (!value) return ''
-  return value
-    .normalize('NFKC')
-    .replace(/\u00a0/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
+/**
+ * タイトル比較用の限定的な旧字体・異体字マップ（明示的・小規模）。
+ * 広い置換はしない。
+ */
+export const TITLE_KANJI_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+  ['元氣', '元気'],
+  ['氣', '気'],
+  ['龍神', '竜神'],
+]
+
+const TRACKING_QUERY_KEYS = new Set([
+  'fbclid',
+  'gclid',
+  'gbraid',
+  'wbraid',
+  'mc_cid',
+  'mc_eid',
+  'igshid',
+  'si',
+])
+
+function applyKanjiVariants(value: string): string {
+  let s = value
+  for (const [from, to] of TITLE_KANJI_VARIANTS) {
+    if (s.includes(from)) s = s.split(from).join(to)
+  }
+  return s
 }
 
-/** URL 比較用（末尾スラッシュ・トラッキング除去） */
+/** 全角英数・記号を半角へ（NFKC）し、空白を正規化。タイトル用に異体字も吸収 */
+export function normalizeText(value: string | null | undefined): string {
+  if (!value) return ''
+  return applyKanjiVariants(
+    value
+      .normalize('NFKC')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase(),
+  )
+}
+
+/**
+ * URL 比較用正規化。
+ * - http/https 差を吸収（比較キーは https 固定）
+ * - www. 有無を吸収
+ * - 末尾スラッシュ除去
+ * - fragment 無視
+ * - utm_* / fbclid / gclid 等のトラッキング query のみ除去（イベント固有 query は保持）
+ */
 export function normalizeUrl(url: string | null | undefined): string | null {
   if (!url) return null
   const trimmed = url.trim()
@@ -63,15 +141,22 @@ export function normalizeUrl(url: string | null | undefined): string | null {
   try {
     const u = new URL(trimmed)
     u.hash = ''
+
     for (const key of [...u.searchParams.keys()]) {
-      if (/^utm_/i.test(key) || key === 'fbclid' || key === 'gclid') {
+      if (/^utm_/i.test(key) || TRACKING_QUERY_KEYS.has(key.toLowerCase())) {
         u.searchParams.delete(key)
       }
     }
+
+    let host = u.hostname.toLowerCase()
+    if (host.startsWith('www.')) host = host.slice(4)
+
     let path = u.pathname.replace(/\/+$/, '')
     if (path === '') path = '/'
+
     const qs = u.searchParams.toString()
-    return `${u.protocol}//${u.host.toLowerCase()}${path}${qs ? `?${qs}` : ''}`
+    // protocol 差は吸収（常に https で比較キー化）
+    return `https://${host}${path}${qs ? `?${qs}` : ''}`
   } catch {
     return normalizeText(trimmed).replace(/\/+$/, '') || null
   }
@@ -79,7 +164,7 @@ export function normalizeUrl(url: string | null | undefined): string | null {
 
 /**
  * タイトル完全一致比較用。
- * 空白・記号を落とし、年・回数は残す（「2026」付き同士の一致を優先）。
+ * 空白・記号を落とし、年・回数は残す。異体字は normalizeText 経由で吸収。
  */
 export function normalizeTitleForExact(title: string | null | undefined): string {
   const base = normalizeText(title)
@@ -94,7 +179,7 @@ export function normalizeTitleForExact(title: string | null | undefined): string
 
 /**
  * 類似度比較用コアタイトル。
- * 年（4桁）と「第N回」は別フィールドでも扱えるよう除去して比較する。
+ * 年（4桁）と「第N回」は除去して比較する。
  */
 export function normalizeTitleCore(title: string | null | undefined): {
   core: string
@@ -141,7 +226,6 @@ export function stringSimilarity(a: string, b: string): number {
   if (!a || !b) return 0
   if (a === b) return 1
 
-  // 短い側が長い側に含まれる場合は高めに評価
   const shorter = a.length <= b.length ? a : b
   const longer = a.length <= b.length ? b : a
   if (shorter.length >= 4 && longer.includes(shorter)) {
@@ -169,7 +253,8 @@ export function stringSimilarity(a: string, b: string): number {
     const other = B.get(g)
     if (other) intersection += Math.min(count, other)
   }
-  const total = [...A.values()].reduce((s, n) => s + n, 0) +
+  const total =
+    [...A.values()].reduce((s, n) => s + n, 0) +
     [...B.values()].reduce((s, n) => s + n, 0)
   return total === 0 ? 0 : (2 * intersection) / total
 }
@@ -190,11 +275,9 @@ export function titleSimilarity(
 
   let score = stringSimilarity(coreA.core, coreB.core)
 
-  // 回数が両方あり不一致なら減点
   if (coreA.edition && coreB.edition && coreA.edition !== coreB.edition) {
     score *= 0.85
   }
-  // 年が両方あり不一致なら減点
   if (coreA.year && coreB.year && coreA.year !== coreB.year) {
     score *= 0.9
   }
@@ -226,7 +309,6 @@ function daySpan(startMs: number, endMs: number): number {
 
 /**
  * 開催期間の重なり比率（短い方の期間に対する重なり日数）。
- * 日付が欠ける場合は 0。start のみなら1日イベントとして扱う。
  */
 export function dateOverlapRatio(
   a: Pick<DedupeCandidate, 'start_date' | 'end_date'>,
@@ -257,7 +339,7 @@ export function dateOverlapRatio(
   }
 }
 
-function urlsEqual(
+export function urlsEqual(
   a: string | null | undefined,
   b: string | null | undefined,
 ): boolean {
@@ -266,22 +348,200 @@ function urlsEqual(
   return Boolean(na && nb && na === nb)
 }
 
+function areasEqual(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean | null {
+  const na = (a ?? '').trim().toLowerCase()
+  const nb = (b ?? '').trim().toLowerCase()
+  if (!na || !nb) return null
+  return na === nb
+}
+
 function round3(n: number): number {
   return Number(n.toFixed(3))
+}
+
+function existingSourceUrls(ex: DedupeExisting): string[] {
+  const urls: string[] = []
+  if (ex.source_url) urls.push(ex.source_url)
+  for (const u of ex.alternate_source_urls ?? []) {
+    if (u) urls.push(u)
+  }
+  return urls
 }
 
 function scoreBundle(
   candidate: DedupeCandidate,
   ex: DedupeExisting,
   titleOverride?: number,
-): DuplicateMatchResult['scores'] {
+): DuplicateMatchScores {
   return {
     title_similarity: round3(
       titleOverride ?? titleSimilarity(candidate.title, ex.title),
     ),
     date_overlap_ratio: round3(dateOverlapRatio(candidate, ex).ratio),
     venue_similarity: round3(venueSimilarity(candidate.venue, ex.venue)),
+    area_match: areasEqual(candidate.area, ex.area),
   }
+}
+
+function buildReviewPayload(
+  candidate: DedupeCandidate,
+  ex: DedupeExisting | null,
+  reason: string,
+  scores?: DuplicateMatchScores,
+): DuplicateMatchResult['review_payload'] {
+  return {
+    incoming: {
+      title: candidate.title,
+      start_date: candidate.start_date,
+      end_date: candidate.end_date,
+      venue: candidate.venue,
+      official_url: candidate.official_url,
+      source_url: candidate.source_url,
+      area: candidate.area ?? null,
+    },
+    candidate: ex
+      ? {
+          id: ex.id ?? null,
+          slug: ex.slug,
+          title: ex.title,
+          status: ex.status ?? null,
+          start_date: ex.start_date,
+          end_date: ex.end_date,
+          venue: ex.venue,
+          area: ex.area ?? null,
+          official_url: ex.official_url,
+          source_url: ex.source_url,
+        }
+      : null,
+    reason,
+    scores,
+  }
+}
+
+function resultExact(
+  candidate: DedupeCandidate,
+  ex: DedupeExisting,
+  reason: string,
+  confidence: number,
+  titleOverride?: number,
+): DuplicateMatchResult {
+  const scores = scoreBundle(candidate, ex, titleOverride)
+  return {
+    duplicate_status: 'exact',
+    matched_event_slug: ex.slug,
+    matched_event_id: ex.id ?? null,
+    matched_title: ex.title,
+    matched_status: ex.status ?? null,
+    duplicate_reason: reason,
+    confidence,
+    recommended_action: 'attach_source_only',
+    scores,
+    review_payload: buildReviewPayload(candidate, ex, reason, scores),
+  }
+}
+
+function resultLikely(
+  candidate: DedupeCandidate,
+  ex: DedupeExisting,
+  reason: string,
+  confidence: number,
+  scores: DuplicateMatchScores,
+): DuplicateMatchResult {
+  return {
+    duplicate_status: 'likely',
+    matched_event_slug: ex.slug,
+    matched_event_id: ex.id ?? null,
+    matched_title: ex.title,
+    matched_status: ex.status ?? null,
+    duplicate_reason: reason,
+    confidence,
+    recommended_action: 'review_required',
+    scores,
+    review_payload: buildReviewPayload(candidate, ex, reason, scores),
+  }
+}
+
+function resultAmbiguous(
+  candidate: DedupeCandidate,
+  ex: DedupeExisting,
+  reason: string,
+  confidence: number,
+  scores: DuplicateMatchScores,
+): DuplicateMatchResult {
+  return {
+    duplicate_status: 'ambiguous',
+    matched_event_slug: ex.slug,
+    matched_event_id: ex.id ?? null,
+    matched_title: ex.title,
+    matched_status: ex.status ?? null,
+    duplicate_reason: reason,
+    confidence,
+    recommended_action: 'review_required',
+    scores,
+    review_payload: buildReviewPayload(candidate, ex, reason, scores),
+  }
+}
+
+function resultNone(candidate: DedupeCandidate, reason: string): DuplicateMatchResult {
+  return {
+    duplicate_status: 'none',
+    matched_event_slug: null,
+    matched_event_id: null,
+    duplicate_reason: reason,
+    confidence: 0,
+    recommended_action: 'create_draft',
+    review_payload: buildReviewPayload(candidate, null, reason),
+  }
+}
+
+/**
+ * sync ログ用の統一フォーマット。
+ */
+export function formatDedupeLog(opts: {
+  status: DuplicateStatus
+  incomingTitle: string | null | undefined
+  match: DuplicateMatchResult
+  action?: string
+}): string[] {
+  const { status, incomingTitle, match } = opts
+  const action = opts.action ?? match.recommended_action
+  const lines = [
+    `[dedupe] ${status}`,
+    `incoming: ${incomingTitle ?? '(no title)'}`,
+  ]
+
+  if (match.matched_event_id != null) {
+    lines.push(
+      status === 'exact'
+        ? `matched_event_id: ${match.matched_event_id}`
+        : `candidate_event_id: ${match.matched_event_id}`,
+    )
+  }
+  if (match.matched_event_slug) {
+    lines.push(`matched_event_slug: ${match.matched_event_slug}`)
+  }
+  if (match.matched_title) {
+    lines.push(`matched_title: ${match.matched_title}`)
+  }
+  if (match.matched_status) {
+    lines.push(`matched_status: ${match.matched_status}`)
+  }
+  lines.push(`reason: ${match.duplicate_reason}`)
+  if (match.scores) {
+    lines.push(
+      `title_score: ${match.scores.title_similarity}`,
+      `venue_score: ${match.scores.venue_similarity}`,
+      `date_overlap: ${match.scores.date_overlap_ratio}`,
+    )
+    if (match.scores.area_match != null) {
+      lines.push(`area_match: ${match.scores.area_match}`)
+    }
+  }
+  lines.push(`action: ${action}`)
+  return lines
 }
 
 /**
@@ -292,50 +552,41 @@ export function matchAgainstExisting(
   existingEvents: DedupeExisting[],
 ): DuplicateMatchResult {
   if (existingEvents.length === 0) {
-    return {
-      duplicate_status: 'none',
-      matched_event_slug: null,
-      duplicate_reason: 'no existing events to compare',
-      confidence: 0,
-    }
+    return resultNone(candidate, 'no existing events to compare')
   }
 
-  // --- 1. exact: URL ---
+  // --- 1. exact: official_url ---
   for (const ex of existingEvents) {
     if (
       candidate.official_url &&
       ex.official_url &&
       urlsEqual(candidate.official_url, ex.official_url)
     ) {
-      return {
-        duplicate_status: 'exact',
-        matched_event_slug: ex.slug,
-        matched_title: ex.title,
-        duplicate_reason: 'exact: official_url match',
-        confidence: 1,
-        scores: scoreBundle(candidate, ex),
-      }
+      return resultExact(
+        candidate,
+        ex,
+        'exact: official_url match',
+        1,
+      )
     }
   }
 
+  // --- 1. exact: source_url（本体 + event_sources 代替） ---
   for (const ex of existingEvents) {
-    if (
-      candidate.source_url &&
-      ex.source_url &&
-      urlsEqual(candidate.source_url, ex.source_url)
-    ) {
-      return {
-        duplicate_status: 'exact',
-        matched_event_slug: ex.slug,
-        matched_title: ex.title,
-        duplicate_reason: 'exact: source_url match',
-        confidence: 1,
-        scores: scoreBundle(candidate, ex),
+    if (!candidate.source_url) continue
+    for (const url of existingSourceUrls(ex)) {
+      if (urlsEqual(candidate.source_url, url)) {
+        return resultExact(
+          candidate,
+          ex,
+          'exact: source_url match',
+          1,
+        )
       }
     }
   }
 
-  // --- 1. exact: 正規化 title + start_date ---
+  // --- 1. exact: 正規化 title + start_date（title のみでは exact にしない） ---
   const candTitleExact = normalizeTitleForExact(candidate.title)
   if (candTitleExact && candidate.start_date) {
     for (const ex of existingEvents) {
@@ -343,19 +594,17 @@ export function matchAgainstExisting(
       if (candidate.start_date !== ex.start_date) continue
       const exTitleExact = normalizeTitleForExact(ex.title)
       if (exTitleExact && candTitleExact === exTitleExact) {
-        return {
-          duplicate_status: 'exact',
-          matched_event_slug: ex.slug,
-          matched_title: ex.title,
-          duplicate_reason: 'exact: normalized title + start_date match',
-          confidence: 0.98,
-          scores: scoreBundle(candidate, ex, 1),
-        }
+        return resultExact(
+          candidate,
+          ex,
+          'exact: normalized_title + start_date',
+          0.98,
+          1,
+        )
       }
     }
   }
 
-  // スコア付きで全件評価（likely / ambiguous）
   type Scored = {
     ex: DedupeExisting
     titleSim: number
@@ -364,6 +613,7 @@ export function matchAgainstExisting(
     dateStrong: boolean
     venueStrong: boolean
     titleStrong: boolean
+    areaMatch: boolean | null
   }
 
   const scored: Scored[] = existingEvents.map((ex) => {
@@ -380,15 +630,19 @@ export function matchAgainstExisting(
       dateStrong,
       venueStrong: venueSim >= VENUE_SIM_HIGH,
       titleStrong: titleSim >= TITLE_SIM_HIGH,
+      areaMatch: areasEqual(candidate.area, ex.area),
     }
   })
 
-  // --- 2. strong / likely: title + date + venue ---
+  // --- 2. likely: title + date + venue（area 一致は加点） ---
   const likely = scored
     .filter((s) => s.titleStrong && s.dateStrong && s.venueStrong)
     .sort((a, b) => {
       const score = (x: Scored) =>
-        x.titleSim * 0.45 + x.date.ratio * 0.3 + x.venueSim * 0.25
+        x.titleSim * 0.4 +
+        x.date.ratio * 0.28 +
+        x.venueSim * 0.22 +
+        (x.areaMatch === true ? 0.1 : 0)
       return score(b) - score(a)
     })
 
@@ -399,26 +653,28 @@ export function matchAgainstExisting(
       0.55 +
         best.titleSim * 0.2 +
         best.date.ratio * 0.12 +
-        best.venueSim * 0.1,
+        best.venueSim * 0.1 +
+        (best.areaMatch === true ? 0.03 : 0),
     )
-    return {
-      duplicate_status: 'likely',
-      matched_event_slug: best.ex.slug,
-      matched_title: best.ex.title,
-      duplicate_reason:
-        `likely: high title similarity (${best.titleSim.toFixed(2)})` +
-        ` + date overlap (${best.date.ratio.toFixed(2)}; sameStart=${best.date.sameStart})` +
-        ` + venue similarity (${best.venueSim.toFixed(2)})`,
-      confidence: Number(confidence.toFixed(3)),
-      scores: {
-        title_similarity: Number(best.titleSim.toFixed(3)),
-        date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-        venue_similarity: Number(best.venueSim.toFixed(3)),
-      },
+    const scores: DuplicateMatchScores = {
+      title_similarity: Number(best.titleSim.toFixed(3)),
+      date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
+      venue_similarity: Number(best.venueSim.toFixed(3)),
+      area_match: best.areaMatch,
     }
+    return resultLikely(
+      candidate,
+      best.ex,
+      `likely: high title similarity (${best.titleSim.toFixed(2)})` +
+        ` + date overlap (${best.date.ratio.toFixed(2)}; sameStart=${best.date.sameStart})` +
+        ` + venue similarity (${best.venueSim.toFixed(2)})` +
+        (best.areaMatch === true ? ' + area match' : ''),
+      Number(confidence.toFixed(3)),
+      scores,
+    )
   }
 
-  // title コア一致 + 日付強い + venue 欠落でも likely 寄り（会場未取得への緩和）
+  // title + date 強い + venue 欠落/中程度 → likely（両方あり低類似は ambiguous）
   const likelyRelaxed = scored
     .filter(
       (s) =>
@@ -430,37 +686,32 @@ export function matchAgainstExisting(
 
   if (likelyRelaxed.length > 0) {
     const best = likelyRelaxed[0]
-    // venue 両方ありで類似が低いなら ambiguous 扱いへ回す
-    if (
-      candidate.venue &&
-      best.ex.venue &&
-      best.venueSim < 0.55
-    ) {
-      // fall through
-    } else {
+    if (!(candidate.venue && best.ex.venue && best.venueSim < 0.55)) {
       const venueNote =
         !candidate.venue || !best.ex.venue
           ? 'venue missing on one side'
           : `venue similarity (${best.venueSim.toFixed(2)})`
-      return {
-        duplicate_status: 'likely',
-        matched_event_slug: best.ex.slug,
-        matched_title: best.ex.title,
-        duplicate_reason:
-          `likely: high title similarity (${best.titleSim.toFixed(2)})` +
-          ` + date overlap (${best.date.ratio.toFixed(2)})` +
-          ` + ${venueNote}`,
-        confidence: Number(
-          Math.min(0.9, 0.5 + best.titleSim * 0.25 + best.date.ratio * 0.1).toFixed(
-            3,
-          ),
-        ),
-        scores: {
-          title_similarity: Number(best.titleSim.toFixed(3)),
-          date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-          venue_similarity: Number(best.venueSim.toFixed(3)),
-        },
+      const scores: DuplicateMatchScores = {
+        title_similarity: Number(best.titleSim.toFixed(3)),
+        date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
+        venue_similarity: Number(best.venueSim.toFixed(3)),
+        area_match: best.areaMatch,
       }
+      return resultLikely(
+        candidate,
+        best.ex,
+        `likely: high title similarity (${best.titleSim.toFixed(2)})` +
+          ` + date overlap (${best.date.ratio.toFixed(2)})` +
+          ` + ${venueNote}` +
+          (best.areaMatch === true ? ' + area match' : ''),
+        Number(
+          Math.min(
+            0.9,
+            0.5 + best.titleSim * 0.25 + best.date.ratio * 0.1,
+          ).toFixed(3),
+        ),
+        scores,
+      )
     }
   }
 
@@ -471,9 +722,7 @@ export function matchAgainstExisting(
 
   const venueOnly = scored
     .filter(
-      (s) =>
-        s.venueSim >= VENUE_SIM_AMBIGUOUS &&
-        s.titleSim < TITLE_SIM_HIGH,
+      (s) => s.venueSim >= VENUE_SIM_AMBIGUOUS && s.titleSim < TITLE_SIM_HIGH,
     )
     .sort((a, b) => b.venueSim - a.venueSim)
 
@@ -490,77 +739,73 @@ export function matchAgainstExisting(
 
   if (titleAndDateNoVenue.length > 0) {
     const best = titleAndDateNoVenue[0]
-    return {
-      duplicate_status: 'ambiguous',
-      matched_event_slug: best.ex.slug,
-      matched_title: best.ex.title,
-      duplicate_reason:
-        `ambiguous: title + date match but venues differ` +
-        ` (title=${best.titleSim.toFixed(2)}, venue=${best.venueSim.toFixed(2)})`,
-      confidence: Number((0.45 + best.titleSim * 0.2).toFixed(3)),
-      scores: {
-        title_similarity: Number(best.titleSim.toFixed(3)),
-        date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-        venue_similarity: Number(best.venueSim.toFixed(3)),
-      },
+    const scores: DuplicateMatchScores = {
+      title_similarity: Number(best.titleSim.toFixed(3)),
+      date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
+      venue_similarity: Number(best.venueSim.toFixed(3)),
+      area_match: best.areaMatch,
     }
+    return resultAmbiguous(
+      candidate,
+      best.ex,
+      `ambiguous: title + date match but venues differ` +
+        ` (title=${best.titleSim.toFixed(2)}, venue=${best.venueSim.toFixed(2)})`,
+      Number((0.45 + best.titleSim * 0.2).toFixed(3)),
+      scores,
+    )
   }
 
   if (titleOnly.length > 0 && !titleOnly[0].dateStrong) {
     const best = titleOnly[0]
-    return {
-      duplicate_status: 'ambiguous',
-      matched_event_slug: best.ex.slug,
-      matched_title: best.ex.title,
-      duplicate_reason: `ambiguous: title similar only (${best.titleSim.toFixed(2)}); dates/venue not strong`,
-      confidence: Number((0.35 + best.titleSim * 0.2).toFixed(3)),
-      scores: {
-        title_similarity: Number(best.titleSim.toFixed(3)),
-        date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-        venue_similarity: Number(best.venueSim.toFixed(3)),
-      },
+    const scores: DuplicateMatchScores = {
+      title_similarity: Number(best.titleSim.toFixed(3)),
+      date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
+      venue_similarity: Number(best.venueSim.toFixed(3)),
+      area_match: best.areaMatch,
     }
+    return resultAmbiguous(
+      candidate,
+      best.ex,
+      `ambiguous: title similar only (${best.titleSim.toFixed(2)}); dates/venue not strong`,
+      Number((0.35 + best.titleSim * 0.2).toFixed(3)),
+      scores,
+    )
   }
 
   if (venueOnly.length > 0) {
     const best = venueOnly[0]
-    return {
-      duplicate_status: 'ambiguous',
-      matched_event_slug: best.ex.slug,
-      matched_title: best.ex.title,
-      duplicate_reason: `ambiguous: venue similar only (${best.venueSim.toFixed(2)})`,
-      confidence: Number((0.3 + best.venueSim * 0.15).toFixed(3)),
-      scores: {
-        title_similarity: Number(best.titleSim.toFixed(3)),
-        date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-        venue_similarity: Number(best.venueSim.toFixed(3)),
-      },
+    const scores: DuplicateMatchScores = {
+      title_similarity: Number(best.titleSim.toFixed(3)),
+      date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
+      venue_similarity: Number(best.venueSim.toFixed(3)),
+      area_match: best.areaMatch,
     }
+    return resultAmbiguous(
+      candidate,
+      best.ex,
+      `ambiguous: venue similar only (${best.venueSim.toFixed(2)})`,
+      Number((0.3 + best.venueSim * 0.15).toFixed(3)),
+      scores,
+    )
   }
 
-  // title 似ていて日付も強いが上の likely に入らなかった残り
   if (titleOnly.length > 0 && titleOnly[0].dateStrong) {
     const best = titleOnly[0]
-    return {
-      duplicate_status: 'ambiguous',
-      matched_event_slug: best.ex.slug,
-      matched_title: best.ex.title,
-      duplicate_reason:
-        `ambiguous: title + date related but not enough for auto-merge` +
-        ` (title=${best.titleSim.toFixed(2)}, venue=${best.venueSim.toFixed(2)})`,
-      confidence: Number((0.4 + best.titleSim * 0.2).toFixed(3)),
-      scores: {
-        title_similarity: Number(best.titleSim.toFixed(3)),
-        date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-        venue_similarity: Number(best.venueSim.toFixed(3)),
-      },
+    const scores: DuplicateMatchScores = {
+      title_similarity: Number(best.titleSim.toFixed(3)),
+      date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
+      venue_similarity: Number(best.venueSim.toFixed(3)),
+      area_match: best.areaMatch,
     }
+    return resultAmbiguous(
+      candidate,
+      best.ex,
+      `ambiguous: title + date related but not enough for auto-merge` +
+        ` (title=${best.titleSim.toFixed(2)}, venue=${best.venueSim.toFixed(2)})`,
+      Number((0.4 + best.titleSim * 0.2).toFixed(3)),
+      scores,
+    )
   }
 
-  return {
-    duplicate_status: 'none',
-    matched_event_slug: null,
-    duplicate_reason: 'no sufficient match',
-    confidence: 0,
-  }
+  return resultNone(candidate, 'no sufficient match')
 }

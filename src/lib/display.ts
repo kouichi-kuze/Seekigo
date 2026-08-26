@@ -2,31 +2,11 @@
  * 表示用ヘルパー（DB値は変更しない）。
  * 一覧・詳細で共通利用。
  */
+import { AREA_LABELS } from './event-field-rules'
+
+export { AREA_LABELS }
 
 const WEEKDAYS_JA = ['日', '月', '火', '水', '木', '金', '土'] as const
-
-/** 内部 area slug → 日本語表示名 */
-export const AREA_LABELS: Record<string, string> = {
-  arakawa: '荒川区',
-  asakusa: '浅草',
-  chuo: '中央区',
-  ginza: '銀座',
-  harajuku: '原宿',
-  higashiyamato: '東大和市',
-  ikebukuro: '池袋',
-  koenji: '高円寺',
-  machida: '町田',
-  meguro: '目黒',
-  minato: '港区',
-  odaiba: 'お台場',
-  oji: '王子',
-  roppongi: '六本木',
-  shibuya: '渋谷',
-  shinjuku: '新宿',
-  sumida: '墨田区',
-  ueno: '上野',
-  yokohama: '横浜',
-}
 
 /**
  * area slug を日本語表示に変換。

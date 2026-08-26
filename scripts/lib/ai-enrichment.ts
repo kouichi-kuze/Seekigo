@@ -69,7 +69,7 @@ export const enrichmentSchema = {
         value: {
           type: ['string', 'null'],
           description:
-            'Tokyo area slug in lowercase english, e.g. shinjuku, shibuya, ueno, odaiba, asakusa, roppongi, arakawa, chuo, minato, taito, higashiyamato. Prefer specific area over ward. null if not certain.',
+            'Tokyo area slug in lowercase english, e.g. shinjuku, shibuya, ueno, odaiba, asakusa, roppongi, arakawa, chuo, minato, taito, tama, higashiyamato, machida, meguro. Prefer specific area over ward. null if not certain.',
         },
         reason: { type: 'string' },
       },
@@ -140,10 +140,11 @@ const SYSTEM_PROMPT = [
   'Use ONLY the provided fields. Do not invent facts.',
   'Do not change or invent title, venue, dates, times, price, urls, or address.',
   'area: lowercase English Tokyo area slug.',
-  'Examples: odaiba, ueno, asakusa, roppongi, shibuya, shinjuku, arakawa, chuo, minato, taito, higashiyamato, harajuku, koenji.',
+  'Examples: odaiba, ueno, asakusa, roppongi, shibuya, shinjuku, arakawa, chuo, minato, taito, tama, higashiyamato, harajuku, koenji, machida, meguro.',
   'Prefer specific neighborhood over ward name when both are known (e.g. 港区+お台場 -> odaiba, not minato).',
   'If area cannot be determined from venue/address/area_hint, area.value must be null.',
-  'is_free.value = true only if price_text clearly says free (無料/入場無料 etc). If paid or unclear, use false or null with reason.',
+  'is_free.value = true if admission/participation itself is free (入場無料/参加無料/無料), even when some contents are paid (一部有料).',
+  'is_free.value = false for clearly paid events (入場料○円 / 一般○円 / 有料). Prefer null when unclear.',
   'Prefer null over false when uncertain for booleans.',
   'is_indoor.value = true only for clearly indoor venues (museum, gallery, hall). Outdoor or unclear => false or null.',
   'is_kids.value = true only if clearly kids-oriented. Otherwise false or null.',

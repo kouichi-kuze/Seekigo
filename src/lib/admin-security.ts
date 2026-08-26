@@ -86,6 +86,22 @@ export function verifyAdminCsrf(opts: {
   return { ok: true }
 }
 
+/** POST body を FormData として読む */
+export async function readAdminPostForm(request: Request): Promise<FormData> {
+  const contentType = request.headers.get('content-type') ?? ''
+
+  if (contentType.includes('multipart/form-data')) {
+    return request.formData()
+  }
+
+  const text = (await request.text()).trim()
+  const form = new FormData()
+  for (const [key, value] of new URLSearchParams(text)) {
+    form.append(key, value)
+  }
+  return form
+}
+
 /** 正の整数 id のみ許可（draft 更新前の入力検証） */
 export function parsePositiveIntIds(raw: FormDataEntryValue[]): number[] {
   const ids: number[] = []

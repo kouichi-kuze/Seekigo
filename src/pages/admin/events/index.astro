@@ -1,8 +1,9 @@
 ---
 /**
- * 開発用 Draft 承認画面（astro dev 専用）。
+ * 開発用 Draft 承認 + 重複候補レビュー画面（astro dev 専用）。
  * - static build / 本番では Service Role を import せず 404 のみ出力
  * - Service Role は DEV 時のみ動的 import（createAdminClient）
+ * - POST は Vite middleware（astro.config.mjs）経由
  */
 if (!import.meta.env.DEV) {
   return new Response('Not Found', {
@@ -15,11 +16,7 @@ if (!import.meta.env.DEV) {
 }
 
 const { createAdminClient } = await import('../../../lib/supabase-admin')
-const {
-  getOrCreateAdminCsrfToken,
-  parsePositiveIntIds,
-  verifyAdminCsrf,
-} = await import('../../../lib/admin-security')
+const { getOrCreateAdminCsrfToken } = await import('../../../lib/admin-security')
 
 type AdminEvent = {
   id: number | string
@@ -29,6 +26,7 @@ type AdminEvent = {
   start_date: string | null
   end_date: string | null
   venue: string | null
+  address?: string | null
   category: string[] | null
   summary: string | null
   source_url: string | null
@@ -36,96 +34,44 @@ type AdminEvent = {
   status: string | null
 }
 
+type IncomingPayload = {
+  title?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  venue?: string | null
+  area?: string | null
+  address?: string | null
+  official_url?: string | null
+  source_url?: string | null
+  price_text?: string | null
+  summary?: string | null
+  image_url?: string | null
+}
+
+type ReviewRow = {
+  id: number
+  status: string
+  incoming_source_name: string
+  incoming_source_url: string
+  incoming_payload: IncomingPayload
+  candidate_event_id: number | null
+  duplicate_status: string
+  reason: string | null
+  scores: Record<string, unknown> | null
+  created_at: string | null
+  candidate?: AdminEvent | null
+}
+
 let message: string | null = null
-let errorMessage: string | null = null
+let errorMessage: string | null = Astro.url.searchParams.get('error')
 
 const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
-
-if (Astro.request.method === 'POST') {
-  try {
-    const form = await Astro.request.formData()
-    const csrfCheck = verifyAdminCsrf({
-      formToken: String(form.get('csrf_token') ?? ''),
-      cookieToken: Astro.cookies.get('seekigo_admin_csrf')?.value,
-      request: Astro.request,
-      url: Astro.url,
-    })
-
-    if (!csrfCheck.ok) {
-      errorMessage = `Security check failed: ${csrfCheck.reason}`
-    } else {
-      const intent = String(form.get('intent') ?? '')
-      const admin = createAdminClient()
-
-      if (intent === 'publish') {
-        const ids = parsePositiveIntIds(
-          [form.get('event_id')].filter(Boolean) as FormDataEntryValue[],
-        )
-        if (ids.length !== 1) {
-          errorMessage = 'Invalid event id'
-        } else {
-          const eventId = ids[0]
-          const { data: existing, error: selectError } = await admin
-            .from('events')
-            .select('id, status, title')
-            .eq('id', eventId)
-            .maybeSingle()
-
-          if (selectError) throw selectError
-          if (!existing) {
-            errorMessage = `Event id=${eventId} not found`
-          } else if (existing.status !== 'draft') {
-            errorMessage = `Event is not draft (status=${existing.status})`
-          } else {
-            const { error: updateError } = await admin
-              .from('events')
-              .update({
-                status: 'published',
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', eventId)
-              .eq('status', 'draft')
-
-            if (updateError) throw updateError
-
-            return Astro.redirect(
-              `/admin/events/?published=1&title=${encodeURIComponent(String(existing.title ?? eventId))}`,
-            )
-          }
-        }
-      } else if (intent === 'publish_selected') {
-        const ids = parsePositiveIntIds(form.getAll('event_ids'))
-        if (ids.length === 0) {
-          errorMessage = 'イベントが選択されていません'
-        } else {
-          const now = new Date().toISOString()
-          const { data: updated, error: updateError } = await admin
-            .from('events')
-            .update({
-              status: 'published',
-              updated_at: now,
-            })
-            .in('id', ids)
-            .eq('status', 'draft')
-            .select('id')
-
-          if (updateError) throw updateError
-
-          const count = updated?.length ?? 0
-          return Astro.redirect(`/admin/events/?bulk=${count}`)
-        }
-      } else {
-        errorMessage = 'Invalid publish request'
-      }
-    }
-  } catch (error) {
-    errorMessage = error instanceof Error ? error.message : String(error)
-  }
-}
 
 const publishedCount = Astro.url.searchParams.get('published')
 const publishedTitle = Astro.url.searchParams.get('title')
 const bulkCount = Astro.url.searchParams.get('bulk')
+const reviewResult = Astro.url.searchParams.get('review')
+const reviewEventId = Astro.url.searchParams.get('event_id')
 
 if (bulkCount && !message) {
   const n = Number(bulkCount)
@@ -136,9 +82,16 @@ if (bulkCount && !message) {
   message = publishedTitle
     ? `Published: ${publishedTitle}`
     : '1件をPublishしました'
+} else if (reviewResult === 'linked') {
+  message = `同一イベントとして紐付けました (event_id=${reviewEventId ?? '?'})`
+} else if (reviewResult === 'created') {
+  message = `別イベントとして draft 登録しました (event_id=${reviewEventId ?? '?'})`
+} else if (reviewResult === 'rejected') {
+  message = 'この候補を登録しない（rejected）にしました'
 }
 
 let events: AdminEvent[] = []
+let reviews: ReviewRow[] = []
 let loadError: string | null = null
 
 try {
@@ -146,15 +99,88 @@ try {
   const { data, error } = await admin
     .from('events')
     .select(
-      'id, title, slug, area, start_date, end_date, venue, category, summary, source_url, official_url, status',
+      'id, title, slug, area, start_date, end_date, venue, address, category, summary, source_url, official_url, status',
     )
     .eq('status', 'draft')
     .order('start_date', { ascending: true })
 
   if (error) throw error
   events = (data ?? []) as AdminEvent[]
+
+  try {
+    const { data: reviewData, error: reviewError } = await admin
+      .from('event_dedupe_reviews')
+      .select(
+        'id, status, incoming_source_name, incoming_source_url, incoming_payload, candidate_event_id, duplicate_status, reason, scores, created_at',
+      )
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+
+    if (reviewError) throw reviewError
+
+    const pending = (reviewData ?? []) as ReviewRow[]
+    const candidateIds = [
+      ...new Set(
+        pending
+          .map((r) => Number(r.candidate_event_id))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    ]
+
+    const candidatesById = new Map<number, AdminEvent>()
+    if (candidateIds.length > 0) {
+      const { data: candidates, error: candErr } = await admin
+        .from('events')
+        .select(
+          'id, title, slug, area, start_date, end_date, venue, address, category, summary, source_url, official_url, status',
+        )
+        .in('id', candidateIds)
+
+      if (candErr) throw candErr
+      for (const c of candidates ?? []) {
+        candidatesById.set(Number(c.id), c as AdminEvent)
+      }
+    }
+
+    reviews = pending.map((r) => ({
+      ...r,
+      candidate:
+        r.candidate_event_id != null
+          ? (candidatesById.get(Number(r.candidate_event_id)) ?? null)
+          : null,
+    }))
+  } catch (reviewLoadError) {
+    // テーブル未作成時でも Draft Publish は使えるようにする
+    errorMessage =
+      (errorMessage ? `${errorMessage} / ` : '') +
+      `Review load: ${
+        reviewLoadError instanceof Error
+          ? reviewLoadError.message
+          : String(reviewLoadError)
+      }`
+  }
 } catch (error) {
   loadError = error instanceof Error ? error.message : String(error)
+}
+
+function scoreText(scores: Record<string, unknown> | null | undefined): string {
+  if (!scores || typeof scores !== 'object') return '—'
+  const title = scores.title_similarity
+  const venue = scores.venue_similarity
+  const date = scores.date_overlap_ratio
+  const area = scores.area_match
+  const parts = [
+    title != null ? `title=${title}` : null,
+    venue != null ? `venue=${venue}` : null,
+    date != null ? `date=${date}` : null,
+    area != null ? `area_match=${area}` : null,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : JSON.stringify(scores)
+}
+
+function displayVal(value: unknown): string {
+  if (value == null || value === '') return '—'
+  return String(value)
 }
 ---
 
@@ -180,12 +206,236 @@ try {
         <p>
           <a href="/tokyo/">公開一覧 /tokyo/ を開く</a>
           · draft {events.length} 件
+          · pending review {reviews.length} 件
         </p>
       </header>
 
       {message && <p class="ok">{message}</p>}
       {errorMessage && <p class="err">{errorMessage}</p>}
       {loadError && <p class="err">Load error: {loadError}</p>}
+
+      <section class="review-section" id="dedupe-reviews">
+        <h2>重複候補レビュー</h2>
+        <p class="section-note">
+          likely / ambiguous のみ。exact は自動 attach、none は draft 作成済みです。
+          published 本体は紐付け時も変更しません。
+        </p>
+
+        {!loadError && reviews.length === 0 && (
+          <p>現在、pending の重複候補はありません。</p>
+        )}
+
+        <div class="review-list">
+          {reviews.map((review) => {
+            const incoming = review.incoming_payload ?? {}
+            const candidate = review.candidate
+            return (
+              <article class="review-card">
+                <div class="review-meta">
+                  <span class={`badge badge-${review.duplicate_status}`}>
+                    {review.duplicate_status}
+                  </span>
+                  <span class="meta-item">
+                    source: {review.incoming_source_name}
+                  </span>
+                  <span class="meta-item">
+                    title score:{' '}
+                    {String(review.scores?.title_similarity ?? '—')}
+                  </span>
+                  <span class="meta-item">
+                    venue score:{' '}
+                    {String(review.scores?.venue_similarity ?? '—')}
+                  </span>
+                  <span class="meta-item">scores: {scoreText(review.scores)}</span>
+                  <span class="meta-item">
+                    candidate_id: {String(review.candidate_event_id ?? '—')}
+                  </span>
+                </div>
+                <p class="reason">{review.reason ?? '—'}</p>
+
+                <div class="compare">
+                  <div class="compare-col">
+                    <h3>Incoming（取得元）</h3>
+                    <dl>
+                      <div>
+                        <dt>タイトル</dt>
+                        <dd>{displayVal(incoming.title)}</dd>
+                      </div>
+                      <div>
+                        <dt>開催日</dt>
+                        <dd>{displayVal(incoming.start_date)}</dd>
+                      </div>
+                      <div>
+                        <dt>終了日</dt>
+                        <dd>{displayVal(incoming.end_date)}</dd>
+                      </div>
+                      <div>
+                        <dt>会場</dt>
+                        <dd>{displayVal(incoming.venue)}</dd>
+                      </div>
+                      <div>
+                        <dt>area</dt>
+                        <dd>{displayVal(incoming.area)}</dd>
+                      </div>
+                      <div>
+                        <dt>住所</dt>
+                        <dd>{displayVal(incoming.address)}</dd>
+                      </div>
+                      <div>
+                        <dt>公式URL</dt>
+                        <dd>
+                          {incoming.official_url ? (
+                            <a
+                              href={incoming.official_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {incoming.official_url}
+                            </a>
+                          ) : (
+                            '—'
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>source URL</dt>
+                        <dd>
+                          <a
+                            href={review.incoming_source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {review.incoming_source_url}
+                          </a>
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div class="compare-col">
+                    <h3>
+                      Candidate（既存
+                      {candidate?.status ? ` · ${candidate.status}` : ''}）
+                    </h3>
+                    {!candidate ? (
+                      <p class="err">候補イベントが見つかりません</p>
+                    ) : (
+                      <dl>
+                        <div>
+                          <dt>タイトル</dt>
+                          <dd>{displayVal(candidate.title)}</dd>
+                        </div>
+                        <div>
+                          <dt>開催日</dt>
+                          <dd>{displayVal(candidate.start_date)}</dd>
+                        </div>
+                        <div>
+                          <dt>終了日</dt>
+                          <dd>{displayVal(candidate.end_date)}</dd>
+                        </div>
+                        <div>
+                          <dt>会場</dt>
+                          <dd>{displayVal(candidate.venue)}</dd>
+                        </div>
+                        <div>
+                          <dt>area</dt>
+                          <dd>{displayVal(candidate.area)}</dd>
+                        </div>
+                        <div>
+                          <dt>住所</dt>
+                          <dd>{displayVal(candidate.address)}</dd>
+                        </div>
+                        <div>
+                          <dt>公式URL</dt>
+                          <dd>
+                            {candidate.official_url ? (
+                              <a
+                                href={candidate.official_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {candidate.official_url}
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>source URL</dt>
+                          <dd>
+                            {candidate.source_url ? (
+                              <a
+                                href={candidate.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {candidate.source_url}
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>slug / id</dt>
+                          <dd>
+                            {displayVal(candidate.slug)} / {String(candidate.id)}
+                          </dd>
+                        </div>
+                      </dl>
+                    )}
+                  </div>
+                </div>
+
+                <div class="review-actions">
+                  <form method="POST" class="inline-form">
+                    <input type="hidden" name="csrf_token" value={csrfToken} />
+                    <input type="hidden" name="intent" value="dedupe_link" />
+                    <input
+                      type="hidden"
+                      name="review_id"
+                      value={String(review.id)}
+                    />
+                    <button type="submit" class="btn-link">
+                      同一イベントとして紐付け
+                    </button>
+                  </form>
+                  <form method="POST" class="inline-form">
+                    <input type="hidden" name="csrf_token" value={csrfToken} />
+                    <input type="hidden" name="intent" value="dedupe_create" />
+                    <input
+                      type="hidden"
+                      name="review_id"
+                      value={String(review.id)}
+                    />
+                    <button type="submit" class="btn-create">
+                      別イベントとしてdraft登録
+                    </button>
+                  </form>
+                  <form method="POST" class="inline-form">
+                    <input type="hidden" name="csrf_token" value={csrfToken} />
+                    <input type="hidden" name="intent" value="dedupe_reject" />
+                    <input
+                      type="hidden"
+                      name="review_id"
+                      value={String(review.id)}
+                    />
+                    <button type="submit" class="btn-reject">
+                      今回は登録しない
+                    </button>
+                  </form>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <section>
+        <h2>Draft 一覧</h2>
 
       {!loadError && events.length === 0 && (
         <p>現在、draft のイベントはありません。</p>
@@ -209,19 +459,6 @@ try {
           </div>
         </form>
       )}
-
-      {/* 個別 Publish フォーム（カード内ボタンから form= で参照） */}
-      {events.map((event) => (
-        <form
-          method="POST"
-          id={`publish-${event.id}`}
-          class="visually-hidden-form"
-        >
-          <input type="hidden" name="csrf_token" value={csrfToken} />
-          <input type="hidden" name="intent" value="publish" />
-          <input type="hidden" name="event_id" value={String(event.id)} />
-        </form>
-      ))}
 
       <div class="list">
         {events.map((event) => (
@@ -311,13 +548,17 @@ try {
                 </div>
               </dl>
 
-              <button type="submit" form={`publish-${event.id}`}>
-                Publish（この1件）
-              </button>
+              <form method="POST" class="publish-form">
+                <input type="hidden" name="csrf_token" value={csrfToken} />
+                <input type="hidden" name="intent" value="publish" />
+                <input type="hidden" name="event_id" value={String(event.id)} />
+                <button type="submit">Publish（この1件）</button>
+              </form>
             </div>
           </article>
         ))}
       </div>
+      </section>
     </main>
 
     <script>
@@ -370,6 +611,28 @@ try {
         }
       })
 
+      for (const form of document.querySelectorAll<HTMLFormElement>(
+        '.review-actions form',
+      )) {
+        form.addEventListener('submit', (e) => {
+          const intent = (
+            form.querySelector(
+              'input[name="intent"]',
+            ) as HTMLInputElement | null
+          )?.value
+          let msg = '実行しますか？'
+          if (intent === 'dedupe_link') {
+            msg =
+              '同一イベントとして紐付けます（既存本体は変更しません）。よろしいですか？'
+          } else if (intent === 'dedupe_create') {
+            msg = '別イベントとして draft を新規登録します。よろしいですか？'
+          } else if (intent === 'dedupe_reject') {
+            msg = 'この候補を登録しない（rejected）にします。よろしいですか？'
+          }
+          if (!confirm(msg)) e.preventDefault()
+        })
+      }
+
       refresh()
     </script>
   </body>
@@ -377,7 +640,7 @@ try {
 
 <style>
   .admin {
-    max-width: 960px;
+    max-width: 1100px;
     margin: 0 auto;
     padding: 1.5rem;
     font-family: system-ui, sans-serif;
@@ -398,6 +661,118 @@ try {
 
   .err {
     color: #a40000;
+  }
+
+  .section-note {
+    color: #555;
+    font-size: 0.95rem;
+  }
+
+  .divider {
+    margin: 2rem 0;
+    border: 0;
+    border-top: 1px solid #ddd;
+  }
+
+  .review-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .review-card {
+    border: 1px solid #cfd8e3;
+    background: #f8fbff;
+    padding: 1rem;
+  }
+
+  .review-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+
+  .badge-likely {
+    background: #fff3cd;
+    color: #7a5b00;
+  }
+
+  .badge-ambiguous {
+    background: #fde2e1;
+    color: #8a1f11;
+  }
+
+  .meta-item {
+    color: #444;
+    font-size: 0.9rem;
+  }
+
+  .reason {
+    margin: 0 0 0.75rem;
+    color: #333;
+  }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  @media (max-width: 800px) {
+    .compare {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .compare-col {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    padding: 0.75rem;
+  }
+
+  .compare-col h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+
+  .review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .inline-form {
+    margin: 0;
+  }
+
+  .btn-link {
+    background: #0b6bcb;
+    color: #fff;
+    border: 0;
+  }
+
+  .btn-create {
+    background: #0a7a32;
+    color: #fff;
+    border: 0;
+  }
+
+  .btn-reject {
+    background: #eee;
+    color: #333;
+    border: 1px solid #ccc;
   }
 
   .toolbar {
@@ -486,17 +861,17 @@ try {
     cursor: pointer;
   }
 
+  .review-actions button {
+    margin-top: 0;
+  }
+
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .visually-hidden-form {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
+  .publish-form {
+    margin: 0;
   }
 
   .sr-only {

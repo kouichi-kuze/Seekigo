@@ -19,6 +19,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as cheerio from 'cheerio'
 import type { CheerioAPI } from 'cheerio'
+import { cleanAddressAccess } from '../src/lib/event-field-rules'
 
 config()
 
@@ -219,10 +220,11 @@ function parseSingleTimeRange(raw: string | null): {
 }
 
 function stripPostal(address: string): string {
-  return address
+  const stripped = address
     .replace(/^〒?\s*\d{3}-?\d{4}\s*/u, '')
     .replace(/\s+/g, ' ')
     .trim()
+  return cleanAddressAccess(stripped) ?? stripped
 }
 
 function buildInfoTableMap($: CheerioAPI): Map<string, { text: string; href: string | null }> {

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import * as cheerio from 'cheerio'
 import type { CheerioAPI } from 'cheerio'
 import { getGotokyoLimit } from './lib/gotokyo-limit'
+import { cleanAddressAccess } from '../src/lib/event-field-rules'
 
 config()
 
@@ -93,10 +94,11 @@ function cleanText(value: string | undefined | null): string | null {
 }
 
 function stripPostal(address: string): string {
-  return address
+  const stripped = address
     .replace(/^〒?\s*\d{3}-?\d{4}\s*/, '')
     .replace(/\s+/g, ' ')
     .trim()
+  return cleanAddressAccess(stripped) ?? stripped
 }
 
 function toAbsoluteUrl(href: string | undefined | null, baseUrl: string): string | null {

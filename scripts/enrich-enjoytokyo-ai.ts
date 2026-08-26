@@ -7,7 +7,8 @@
  * - slug が enjoytokyo-*（新規作成分。exact attach の published は対象外）
  *
  * AI 更新フィールドのみ: area / is_free / is_indoor / is_kids / is_night / category / summary
- * 事実フィールドは絶対に変更しない。
+ * area / is_free は deterministic 判定を優先し、AI は判定不能時のみ fallback。
+ * 事実フィールド（日時・会場・住所・料金原文・URL・画像）は絶対に変更しない。
  *
  * DRY_RUN=true（デフォルト）: AI 結果を表示するだけ
  * DRY_RUN=false: draft のみ UPDATE
@@ -23,6 +24,10 @@ import {
   enrichEventWithAi,
   type AiEnrichment,
 } from './lib/ai-enrichment'
+import {
+  inferIsFreeFromPriceText,
+  resolveAreaSlug,
+} from '../src/lib/event-field-rules'
 
 config()
 
@@ -156,6 +161,7 @@ function logResult(
   event: DbEvent,
   ai: AiEnrichment | null,
   aiError: string | null,
+  resolved?: { area: string | null; is_free: boolean | null; ruleArea: string | null; ruleIsFree: boolean | null },
 ) {
   console.log(`[enrich-enjoytokyo-ai] ---- ${index}/${total} ----`)
   console.log(`[enrich-enjoytokyo-ai] title: ${event.title}`)
@@ -163,8 +169,17 @@ function logResult(
   if (aiError) {
     console.log(`[enrich-enjoytokyo-ai] ai_error: ${aiError}`)
   }
-  console.log(`[enrich-enjoytokyo-ai] area: ${ai?.area.value ?? null}`)
-  console.log(`[enrich-enjoytokyo-ai] is_free: ${ai?.is_free.value ?? null}`)
+  if (resolved) {
+    console.log(
+      `[enrich-enjoytokyo-ai] area: ${resolved.area} (rule=${resolved.ruleArea} ai=${ai?.area.value ?? null})`,
+    )
+    console.log(
+      `[enrich-enjoytokyo-ai] is_free: ${resolved.is_free} (rule=${resolved.ruleIsFree} ai=${ai?.is_free.value ?? null})`,
+    )
+  } else {
+    console.log(`[enrich-enjoytokyo-ai] area: ${ai?.area.value ?? null}`)
+    console.log(`[enrich-enjoytokyo-ai] is_free: ${ai?.is_free.value ?? null}`)
+  }
   console.log(`[enrich-enjoytokyo-ai] is_indoor: ${ai?.is_indoor.value ?? null}`)
   console.log(`[enrich-enjoytokyo-ai] is_kids: ${ai?.is_kids.value ?? null}`)
   console.log(`[enrich-enjoytokyo-ai] is_night: ${ai?.is_night.value ?? null}`)
@@ -264,25 +279,31 @@ async function main() {
         end_time: event.end_time,
         area_hint: extra?.area ?? null,
       })
-      logResult(i + 1, targets.length, event, ai, null)
-    } catch (error) {
-      failed += 1
-      const message = error instanceof Error ? error.message : String(error)
-      console.error(`[enrich-enjoytokyo-ai] error: ${message}`)
-      logResult(i + 1, targets.length, event, null, message)
-      continue
-    }
 
-    if (DRY_RUN) {
-      continue
-    }
+      const ruleArea = resolveAreaSlug({
+        areaHint: extra?.area ?? event.area,
+        address: event.address,
+        venue: event.venue,
+      })
+      const ruleIsFree = inferIsFreeFromPriceText(event.price_text)
+      const resolved = {
+        ruleArea,
+        ruleIsFree,
+        area: ruleArea ?? ai.area.value ?? event.area ?? null,
+        is_free: ruleIsFree ?? ai.is_free.value ?? null,
+      }
 
-    try {
+      logResult(i + 1, targets.length, event, ai, null, resolved)
+
+      if (DRY_RUN) {
+        continue
+      }
+
       const { data, error } = await supabase
         .from('events')
         .update({
-          area: ai.area.value,
-          is_free: ai.is_free.value,
+          area: resolved.area,
+          is_free: resolved.is_free,
           is_indoor: ai.is_indoor.value,
           is_kids: ai.is_kids.value,
           is_night: ai.is_night.value,
@@ -305,11 +326,15 @@ async function main() {
       }
 
       updated += 1
-      console.log(`[enrich-enjoytokyo-ai] updated ok: ${event.slug}`)
+      console.log(
+        `[enrich-enjoytokyo-ai] updated ok: ${event.slug} area=${resolved.area} is_free=${resolved.is_free}`,
+      )
     } catch (error) {
       failed += 1
       const message = error instanceof Error ? error.message : String(error)
-      console.error(`[enrich-enjoytokyo-ai] update failed: ${message}`)
+      console.error(`[enrich-enjoytokyo-ai] error: ${message}`)
+      logResult(i + 1, targets.length, event, null, message)
+      continue
     }
   }
 

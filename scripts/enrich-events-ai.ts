@@ -15,6 +15,11 @@ import {
   enrichEventWithAi,
   type AiEnrichment,
 } from './lib/ai-enrichment'
+import {
+  cleanAddressAccess,
+  inferIsFreeFromPriceText,
+  resolveAreaSlug,
+} from '../src/lib/event-field-rules'
 
 config()
 
@@ -78,6 +83,8 @@ type EnrichedEvent = {
 }
 
 function preserveFacts(event: SourceEvent) {
+  const address =
+    cleanAddressAccess(event.address) ?? event.address ?? null
   return {
     title: event.title,
     description: event.description,
@@ -86,7 +93,7 @@ function preserveFacts(event: SourceEvent) {
     start_time: event.start_time,
     end_time: event.end_time,
     venue: event.venue,
-    address: event.address,
+    address,
     price_text: event.price_text,
     official_url: event.official_url,
     image_url: event.image_url,
@@ -116,12 +123,23 @@ function emptyEnrichment(error: string): Omit<
 }
 
 function mergeEnrichment(event: SourceEvent, ai: AiEnrichment): EnrichedEvent {
+  const facts = preserveFacts(event)
+  const ruleArea = resolveAreaSlug({
+    address: facts.address,
+    venue: facts.venue,
+  })
+  const ruleIsFree = inferIsFreeFromPriceText(facts.price_text)
+
   return {
-    ...preserveFacts(event),
-    area: ai.area?.value ?? null,
-    area_reason: ai.area?.reason ?? null,
-    is_free: ai.is_free?.value ?? null,
-    is_free_reason: ai.is_free?.reason ?? null,
+    ...facts,
+    area: ruleArea ?? ai.area?.value ?? null,
+    area_reason: ruleArea
+      ? `deterministic: ${ruleArea}`
+      : (ai.area?.reason ?? null),
+    is_free: ruleIsFree ?? ai.is_free?.value ?? null,
+    is_free_reason: ruleIsFree !== null
+      ? `deterministic: ${ruleIsFree}`
+      : (ai.is_free?.reason ?? null),
     is_indoor: ai.is_indoor?.value ?? null,
     is_indoor_reason: ai.is_indoor?.reason ?? null,
     is_kids: ai.is_kids?.value ?? null,
@@ -212,9 +230,20 @@ async function main() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`[enrich-events-ai] error: ${message}`)
+      const facts = preserveFacts(event)
+      const ruleArea = resolveAreaSlug({
+        address: facts.address,
+        venue: facts.venue,
+      })
+      const ruleIsFree = inferIsFreeFromPriceText(facts.price_text)
       const failed: EnrichedEvent = {
-        ...preserveFacts(event),
+        ...facts,
         ...emptyEnrichment(message),
+        area: ruleArea,
+        area_reason: ruleArea ? `deterministic: ${ruleArea}` : null,
+        is_free: ruleIsFree,
+        is_free_reason:
+          ruleIsFree !== null ? `deterministic: ${ruleIsFree}` : null,
       }
       enriched.push(failed)
       logEnriched(i, failed)
