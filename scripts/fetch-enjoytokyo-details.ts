@@ -20,6 +20,19 @@ import { fileURLToPath } from 'node:url'
 import * as cheerio from 'cheerio'
 import type { CheerioAPI } from 'cheerio'
 import { cleanAddressAccess } from '../src/lib/event-field-rules'
+import {
+  collectHtmlImageCandidates,
+  extractJsonLdImageUrl,
+  logEventImageResolve,
+  resolveEventImage,
+  type EventImageResolveResult,
+} from '../src/lib/event-image-rules'
+import {
+  extractTimeFromIsoDateTime,
+  logEventTimeParse,
+  parseEventTimeText,
+  type EventTimeParseResult,
+} from '../src/lib/event-time-rules'
 
 config()
 
@@ -91,6 +104,19 @@ type EnjoyTokyoDetail = {
   image_url: string | null
   source_url: string
   field_sources: FieldSources
+  /** tmp debug: 取得できた時間テキストと判定 */
+  time_debug?: {
+    raw: string | null
+    action: string
+    reason: string | null
+    source: string | null
+  } | null
+  /** tmp debug: 画像取得元 */
+  image_debug?: {
+    source: string | null
+    action: string
+    reason: string | null
+  } | null
   notes: string[]
   error: string | null
 }
@@ -140,13 +166,6 @@ function parseYmd(value: string | null | undefined): string | null {
   return null
 }
 
-function parseHm(value: string | null | undefined): string | null {
-  if (!value) return null
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})$/)
-  if (!m) return null
-  return `${m[1].padStart(2, '0')}:${m[2]}`
-}
-
 function parseDateRangeText(raw: string | null): {
   start_date: string | null
   end_date: string | null
@@ -181,42 +200,11 @@ function parseDateRangeText(raw: string | null): {
 }
 
 /**
- * 単一の「HH:MM〜HH:MM」だけなら採用。
- * 平日/土日で複数パターンがある場合は確定できないため null。
+ * 単一の時間帯／開始・終了ラベルのみ採用。
+ * 平日/土日や部ごとの複数パターンは keep_null。
  */
-function parseSingleTimeRange(raw: string | null): {
-  start_time: string | null
-  end_time: string | null
-  note?: string
-} {
-  if (!raw) return { start_time: null, end_time: null }
-  const text = raw.split('※')[0].replace(/\s+/g, ' ').trim()
-  const ranges = [
-    ...text.matchAll(/(\d{1,2}:\d{2})\s*[〜～\-–—]\s*(\d{1,2}:\d{2})/g),
-  ]
-
-  if (ranges.length === 0) {
-    return { start_time: null, end_time: null }
-  }
-
-  const normalized = ranges.map((m) => ({
-    start: parseHm(m[1]),
-    end: parseHm(m[2]),
-  }))
-
-  const unique = new Set(normalized.map((r) => `${r.start}-${r.end}`))
-  if (unique.size !== 1) {
-    return {
-      start_time: null,
-      end_time: null,
-      note: `multiple time ranges left null: ${text.slice(0, 80)}`,
-    }
-  }
-
-  return {
-    start_time: normalized[0].start,
-    end_time: normalized[0].end,
-  }
+function parseTableTimeText(raw: string | null): EventTimeParseResult {
+  return parseEventTimeText(raw)
 }
 
 function stripPostal(address: string): string {
@@ -377,28 +365,26 @@ function extractJsonLdEvent($: CheerioAPI, pageUrl: string): JsonLdExtract {
         if (typeof obj.startDate === 'string' && !result.start_date) {
           result.start_date = parseYmd(obj.startDate.slice(0, 10))
           if (result.start_date) result.sources.start_date = src('startDate')
-          const t = obj.startDate.match(/T(\d{2}:\d{2})/)?.[1]
+          const t = extractTimeFromIsoDateTime(obj.startDate)
           if (t && !result.start_time) {
-            result.start_time = parseHm(t)
-            if (result.start_time) result.sources.start_time = src('startDate')
+            result.start_time = t
+            result.sources.start_time = src('startDate')
           }
         }
         if (typeof obj.endDate === 'string' && !result.end_date) {
           result.end_date = parseYmd(obj.endDate.slice(0, 10))
           if (result.end_date) result.sources.end_date = src('endDate')
-          const t = obj.endDate.match(/T(\d{2}:\d{2})/)?.[1]
+          const t = extractTimeFromIsoDateTime(obj.endDate)
           if (t && !result.end_time) {
-            result.end_time = parseHm(t)
-            if (result.end_time) result.sources.end_time = src('endDate')
+            result.end_time = t
+            result.sources.end_time = src('endDate')
           }
         }
         if (!result.image_url) {
-          if (typeof obj.image === 'string') {
-            result.image_url = toAbsoluteUrl(obj.image, pageUrl)
-            if (result.image_url) result.sources.image_url = src('image')
-          } else if (Array.isArray(obj.image) && typeof obj.image[0] === 'string') {
-            result.image_url = toAbsoluteUrl(obj.image[0], pageUrl)
-            if (result.image_url) result.sources.image_url = src('image[0]')
+          const img = extractJsonLdImageUrl(obj.image, pageUrl)
+          if (img) {
+            result.image_url = img
+            result.sources.image_url = src('image')
           }
         }
 
@@ -571,7 +557,16 @@ function extractDetail(
   const field_sources: FieldSources = {}
 
   const periodCell = tableValue(table, ['開催期間'])
-  const timeCell = tableValue(table, ['時間', '開催時間', '開場時間'])
+  const timeCell = tableValue(table, [
+    '時間',
+    '開催時間',
+    '開場時間',
+    '開館時間',
+    '営業時間',
+    '開催時刻',
+    '開始時間',
+    '開演時間',
+  ])
   const venueCell = tableValue(table, ['会場'])
   const placeCell = tableValue(table, ['開催場所'])
   const addressCell = tableValue(table, ['所在地', '住所'])
@@ -590,15 +585,20 @@ function extractDetail(
   const ogDescRaw = cleanText($('meta[property="og:description"]').attr('content'))
   const ogDesc =
     ogDescRaw && !/開催日時、所在地、地図/.test(ogDescRaw) ? ogDescRaw : null
-  const ogImage = toAbsoluteUrl(
-    $('meta[property="og:image"]').attr('content') ?? null,
-    pageUrl,
-  )
+  const ogImageRaw = $('meta[property="og:image"]').attr('content') ?? null
+  const twitterImageRaw =
+    $('meta[name="twitter:image"]').attr('content') ??
+    $('meta[property="twitter:image"]').attr('content') ??
+    null
 
   const periodFromTable = parseDateRangeText(periodCell?.text ?? null)
   const periodFromHeader = parseDateRangeText(headerDate)
-  const timeFromTable = parseSingleTimeRange(timeCell?.text ?? null)
-  if (timeFromTable.note) notes.push(timeFromTable.note)
+  const timeFromTable = parseTableTimeText(timeCell?.text ?? null)
+  if (timeFromTable.action !== 'parsed' && timeFromTable.raw) {
+    notes.push(
+      `time ${timeFromTable.action}: ${timeFromTable.reason} raw="${timeFromTable.raw.slice(0, 80)}"`,
+    )
+  }
 
   const tableAddress = extractAddressFromTable($, addressCell)
   const tableOfficial = extractOfficialFromTable(officialCell, pageUrl)
@@ -668,31 +668,66 @@ function extractDetail(
     { tier: 4, value: listing.end_date, source: 'listing end_date' },
   ])
 
-  const start_time = pickByPriority([
-    {
-      tier: 1,
+  // 時刻: JSON-LD datetime 優先。無い場合のみテーブル。
+  let start_time: PickedField = { value: null, source: null, tier: null }
+  let end_time: PickedField = { value: null, source: null, tier: null }
+  let time_debug: EnjoyTokyoDetail['time_debug'] = null
+
+  if (ld.start_time || ld.end_time) {
+    start_time = {
       value: ld.start_time,
       source: ld.sources.start_time ?? 'json-ld.Event.startDate',
-    },
-    {
-      tier: 2,
-      value: timeFromTable.start_time,
-      source: `table "${timeCell?.matchedLabel ?? '時間'}"`,
-    },
-  ])
-
-  const end_time = pickByPriority([
-    {
       tier: 1,
+    }
+    end_time = {
       value: ld.end_time,
       source: ld.sources.end_time ?? 'json-ld.Event.endDate',
-    },
-    {
-      tier: 2,
-      value: timeFromTable.end_time,
-      source: `table "${timeCell?.matchedLabel ?? '時間'}"`,
-    },
-  ])
+      tier: 1,
+    }
+    time_debug = {
+      raw: null,
+      action: 'parsed',
+      reason: 'json_ld_datetime',
+      source: start_time.source ?? end_time.source,
+    }
+    logEventTimeParse({
+      title: title.value,
+      source: time_debug.source,
+      result: {
+        start_time: ld.start_time,
+        end_time: ld.end_time,
+        action: 'parsed',
+        reason: 'json_ld_datetime',
+        raw: null,
+        ranges_found: ld.start_time && ld.end_time ? 1 : 0,
+      },
+    })
+  } else {
+    const tableSource = `table "${timeCell?.matchedLabel ?? '時間'}"`
+    time_debug = {
+      raw: timeFromTable.raw,
+      action: timeFromTable.action,
+      reason: timeFromTable.reason,
+      source: timeCell ? tableSource : null,
+    }
+    if (timeFromTable.action === 'parsed') {
+      start_time = {
+        value: timeFromTable.start_time,
+        source: tableSource,
+        tier: 2,
+      }
+      end_time = {
+        value: timeFromTable.end_time,
+        source: timeFromTable.end_time ? tableSource : null,
+        tier: 2,
+      }
+    }
+    logEventTimeParse({
+      title: title.value,
+      source: timeCell ? tableSource : null,
+      result: timeFromTable,
+    })
+  }
 
   const venue = pickByPriority([
     {
@@ -757,14 +792,56 @@ function extractDetail(
     },
   ])
 
-  const image_url = pickByPriority([
-    {
-      tier: 1,
-      value: ld.image_url,
-      source: ld.sources.image_url ?? 'json-ld.Event.image',
-    },
-    { tier: 3, value: ogImage, source: 'meta[property=og:image]' },
-  ])
+  // 画像: JSON-LD → og → twitter → HTML（共通 helper）
+  const htmlCandidates = collectHtmlImageCandidates(
+    $('img[src]')
+      .toArray()
+      .map((el) => {
+        const $el = $(el)
+        return {
+          src: $el.attr('src') ?? $el.attr('data-src') ?? null,
+          width: $el.attr('width') ?? null,
+          height: $el.attr('height') ?? null,
+          className: $el.attr('class') ?? null,
+          alt: $el.attr('alt') ?? null,
+        }
+      }),
+  )
+
+  const imageResolved: EventImageResolveResult = ld.image_url
+    ? {
+        image_url: ld.image_url,
+        source: 'jsonld',
+        source_detail: ld.sources.image_url ?? 'json-ld.Event.image',
+        action: 'parsed',
+        reason: null,
+      }
+    : resolveEventImage({
+        pageUrl,
+        ogImage: ogImageRaw,
+        twitterImage: twitterImageRaw,
+        htmlCandidates,
+      })
+
+  logEventImageResolve({ title: title.value, result: imageResolved })
+  const image_debug = {
+    source: imageResolved.source,
+    action: imageResolved.action,
+    reason: imageResolved.reason,
+  }
+  const image_url: PickedField = {
+    value: imageResolved.image_url,
+    source: imageResolved.source_detail,
+    tier:
+      imageResolved.source === 'jsonld'
+        ? 1
+        : imageResolved.source === 'og:image' ||
+            imageResolved.source === 'twitter:image'
+          ? 3
+          : imageResolved.source === 'html'
+            ? 3
+            : null,
+  }
 
   const picked = {
     title,
@@ -813,6 +890,8 @@ function extractDetail(
     image_url: image_url.value,
     source_url: pageUrl,
     field_sources,
+    time_debug,
+    image_debug,
     notes,
     error: null,
   }
@@ -834,6 +913,8 @@ function emptyDetail(sourceUrl: string, error: string): EnjoyTokyoDetail {
     image_url: null,
     source_url: sourceUrl,
     field_sources: {},
+    time_debug: null,
+    image_debug: null,
     notes: [],
     error,
   }
@@ -964,6 +1045,42 @@ async function main() {
     events: details,
   }
   await writeFile(detailsJsonPath, JSON.stringify(payload, null, 2), 'utf8')
+
+  const startCount = details.filter((d) => d.start_time).length
+  const endCount = details.filter((d) => d.end_time).length
+  const ambiguous = details.filter((d) => d.time_debug?.action === 'keep_null')
+    .length
+  const notFound = details.filter(
+    (d) =>
+      !d.start_time &&
+      !d.end_time &&
+      (d.time_debug?.action === 'not_found' || !d.time_debug),
+  ).length
+  console.log('[fetch-enjoytokyo-details] ---- time summary ----')
+  console.log(`[fetch-enjoytokyo-details] total: ${details.length}`)
+  console.log(`[fetch-enjoytokyo-details] start_time: ${startCount}`)
+  console.log(`[fetch-enjoytokyo-details] end_time: ${endCount}`)
+  console.log(`[fetch-enjoytokyo-details] ambiguous: ${ambiguous}`)
+  console.log(`[fetch-enjoytokyo-details] not_found: ${notFound}`)
+
+  const imageCount = details.filter((d) => d.image_url).length
+  const bySource = {
+    jsonld: details.filter((d) => d.image_debug?.source === 'jsonld').length,
+    og: details.filter((d) => d.image_debug?.source === 'og:image').length,
+    twitter: details.filter((d) => d.image_debug?.source === 'twitter:image')
+      .length,
+    html: details.filter((d) => d.image_debug?.source === 'html').length,
+    not_found: details.filter((d) => !d.image_url).length,
+  }
+  console.log('[fetch-enjoytokyo-details] ---- image summary ----')
+  console.log(`[fetch-enjoytokyo-details] total: ${details.length}`)
+  console.log(`[fetch-enjoytokyo-details] image_url: ${imageCount}`)
+  console.log(`[fetch-enjoytokyo-details] jsonld: ${bySource.jsonld}`)
+  console.log(`[fetch-enjoytokyo-details] og:image: ${bySource.og}`)
+  console.log(`[fetch-enjoytokyo-details] twitter:image: ${bySource.twitter}`)
+  console.log(`[fetch-enjoytokyo-details] html fallback: ${bySource.html}`)
+  console.log(`[fetch-enjoytokyo-details] not_found: ${bySource.not_found}`)
+
   console.log(
     `[fetch-enjoytokyo-details] saved ${path.relative(rootDir, detailsJsonPath)} (gitignored)`,
   )

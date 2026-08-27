@@ -1,0 +1,207 @@
+---
+/**
+ * カテゴリ／条件別イベント一覧の共通レイアウト。
+ * /tokyo/ のカードグリッド・余白トーンに合わせる（/tokyo/ 本体は変更しない）。
+ */
+import EventCard from './EventCard.astro'
+import type { Event } from '../lib/events'
+
+export type EmptyLink = {
+  href: string
+  label: string
+}
+
+interface Props {
+  /** パンくずの現在ページ名（例: 無料） */
+  breadcrumbCurrent: string
+  /** 小さなカテゴリラベル */
+  eyebrow: string
+  /** h1 */
+  headline: string
+  /** 説明文 */
+  description: string
+  /** 件数ラベル接頭辞（例: 無料イベント） */
+  countLabel: string
+  events: Event[]
+  /** 空状態メッセージ */
+  emptyMessage?: string
+  /** 空状態の追加導線（最大2つ程度推奨） */
+  emptyLinks?: EmptyLink[]
+}
+
+const {
+  breadcrumbCurrent,
+  eyebrow,
+  headline,
+  description,
+  countLabel,
+  events,
+  emptyMessage = '現在、該当するイベントはありません。',
+  emptyLinks = [
+    { href: '/tokyo/', label: '東京のイベント一覧へ' },
+    { href: '/tokyo/today/', label: '今日のイベント' },
+  ],
+} = Astro.props
+
+const count = events.length
+---
+
+<main class="list-page">
+  <section class="list-hero">
+    <div class="inner">
+      <nav class="list-breadcrumb" aria-label="パンくず">
+        <a href="/tokyo/">東京のイベント</a>
+        <span class="list-breadcrumb__sep" aria-hidden="true">›</span>
+        <span aria-current="page">{breadcrumbCurrent}</span>
+      </nav>
+
+      <p class="list-hero__eyebrow">{eyebrow}</p>
+      <h1 class="list-hero__headline">{headline}</h1>
+      <p class="list-hero__sub">{description}</p>
+    </div>
+  </section>
+
+  <section class="list-events">
+    <div class="inner">
+      {count > 0 ? (
+        <>
+          <p class="list-events__count">
+            {countLabel} {count}件
+          </p>
+          <div class="card-grid">
+            {events.map((event) => (
+              <EventCard event={event} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div class="list-empty">
+          <p class="list-empty__main">{emptyMessage}</p>
+          {emptyLinks.length > 0 && (
+            <div class="list-empty__links">
+              {emptyLinks.slice(0, 2).map((link) => (
+                <a href={link.href} class="list-empty__link">
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  </section>
+</main>
+
+<style>
+  .list-hero {
+    background: var(--c-white);
+    border-bottom: 1px solid var(--c-border);
+    padding: 48px 0 40px;
+  }
+
+  .list-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--c-muted);
+    margin-bottom: 16px;
+  }
+  .list-breadcrumb a {
+    color: var(--c-primary);
+  }
+  .list-breadcrumb a:hover {
+    text-decoration: underline;
+  }
+  .list-breadcrumb__sep {
+    color: var(--c-border);
+  }
+
+  .list-hero__eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--c-primary);
+    margin-bottom: 12px;
+  }
+  .list-hero__headline {
+    font-size: clamp(28px, 5vw, 40px);
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--c-text);
+    line-height: 1.2;
+  }
+  .list-hero__sub {
+    font-size: 15px;
+    color: var(--c-muted);
+    margin-top: 12px;
+    line-height: 1.7;
+    max-width: 40rem;
+  }
+
+  .list-events {
+    padding: 40px 0 0;
+  }
+  .list-events__count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--c-muted);
+    margin-bottom: 20px;
+    min-height: 20px;
+  }
+
+  /* /tokyo/ と同じカードグリッド */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  .list-empty {
+    padding: 64px 0;
+    text-align: center;
+  }
+  .list-empty__main {
+    font-size: 16px;
+    color: var(--c-muted);
+    margin-bottom: 24px;
+    line-height: 1.7;
+  }
+  .list-empty__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+  }
+  .list-empty__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--c-primary);
+    color: var(--c-white) !important;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 20px;
+    border-radius: var(--r-lg);
+    transition: background 0.15s;
+  }
+  .list-empty__link:hover {
+    background: var(--c-primary-dk);
+  }
+  .list-empty__links .list-empty__link:nth-child(2) {
+    background: transparent;
+    color: var(--c-primary) !important;
+    border: 2px solid var(--c-primary);
+  }
+  .list-empty__links .list-empty__link:nth-child(2):hover {
+    background: #eff6ff;
+  }
+
+  @media (max-width: 480px) {
+    .list-hero {
+      padding: 36px 0 32px;
+    }
+  }
+</style>

@@ -20,6 +20,9 @@ pnpm-debug.log*
 .env.production
 .env.*.local
 
+# Turnstile Secret（Xserver / ローカル PHP テスト用）
+config/turnstile.php
+
 # fetch script cache (HTML snapshots; not for git)
 tmp/
 

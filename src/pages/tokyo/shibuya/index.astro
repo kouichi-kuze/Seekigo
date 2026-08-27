@@ -1,7 +1,7 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
+import EventListPage from '../../../components/EventListPage.astro'
 import { getAreaEvents } from '../../../lib/events'
-import EventCard from '../../../components/EventCard.astro'
 
 const events = await getAreaEvents('shibuya')
 ---
@@ -10,27 +10,13 @@ const events = await getAreaEvents('shibuya')
   title="渋谷のイベント | Seekigo"
   description="渋谷エリアで開催されるイベント・お祭り・展示・グルメ・お出かけ情報を紹介します。"
 >
-  <main>
-    <p>
-      <a href="/tokyo/">東京イベントTOP</a>
-    </p>
-
-    <header>
-      <h1>渋谷のイベント</h1>
-    </header>
-
-    <section>
-      <h2>渋谷エリアのイベント</h2>
-
-      {events.length > 0 ? (
-        <div>
-          {events.map((event) => (
-            <EventCard event={event} />
-          ))}
-        </div>
-      ) : (
-        <p>現在掲載中の渋谷エリアのイベントはありません。</p>
-      )}
-    </section>
-  </main>
+  <EventListPage
+    breadcrumbCurrent="渋谷"
+    eyebrow="Shibuya"
+    headline="渋谷のイベント"
+    description="渋谷エリアで開催されるイベントをまとめています。"
+    countLabel="渋谷のイベント"
+    events={events}
+    emptyMessage="現在掲載中の渋谷エリアのイベントはありません。"
+  />
 </Layout>

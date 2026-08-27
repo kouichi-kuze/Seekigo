@@ -28,6 +28,8 @@ export type Event = {
 export type EventFilters = {
   isFree?: boolean
   isKids?: boolean
+  isIndoor?: boolean
+  isNight?: boolean
   area?: string
 }
 
@@ -54,6 +56,14 @@ export async function getPublishedEvents(
 
   if (filters.isKids === true) {
     query = query.eq('is_kids', true)
+  }
+
+  if (filters.isIndoor === true) {
+    query = query.eq('is_indoor', true)
+  }
+
+  if (filters.isNight === true) {
+    query = query.eq('is_night', true)
   }
 
   if (filters.area) {

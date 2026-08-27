@@ -14,6 +14,7 @@ import {
   inferIsFreeFromPriceText,
   resolveAreaSlug,
 } from './event-field-rules'
+import { defaultImageMetaForSource } from './event-image-usage'
 import {
   ensureEventSource,
   extractEnjoytokyoEventId,
@@ -275,6 +276,15 @@ async function createNewDraft(
     category,
     summary: payload.summary ?? null,
     image_url: payload.image_url ?? null,
+    ...(payload.image_url
+      ? defaultImageMetaForSource(
+          sourceName === 'gotokyo' ? 'gotokyo' : 'enjoytokyo',
+        )
+      : {
+          image_usage_status: 'unknown' as const,
+          image_source: null,
+          image_credit: null,
+        }),
     status: 'draft' as const,
     last_checked_at: now,
   }

@@ -5,6 +5,8 @@ import {
   verifyAdminCsrf,
 } from './admin-security'
 import { processAdminDedupeReviewPost } from './admin-dedupe-review'
+import { processAdminImageUsagePost } from './admin-image-usage'
+import { processAdminFieldReviewPost } from './admin-field-review'
 
 type AdminCookies = {
   get: (name: string) => { value: string } | undefined
@@ -17,7 +19,7 @@ export type AdminPostResult =
 /** @deprecated alias */
 export type AdminPublishResult = AdminPostResult
 
-/** DEV 用: /admin/events/ POST（Publish + dedupe review） */
+/** DEV 用: /admin/events/ POST（Publish + dedupe review + image usage） */
 export async function processAdminPublishPost(opts: {
   request: Request
   url: URL
@@ -33,6 +35,14 @@ export async function processAdminPublishPost(opts: {
     intent === 'dedupe_reject'
   ) {
     return processAdminDedupeReviewPost({ request, url, cookies, form })
+  }
+
+  if (intent === 'image_usage_update') {
+    return processAdminImageUsagePost({ request, url, cookies, form })
+  }
+
+  if (intent === 'field_accept' || intent === 'field_reject') {
+    return processAdminFieldReviewPost({ request, url, cookies, form })
   }
 
   const csrfCheck = verifyAdminCsrf({

@@ -1,0 +1,22 @@
+---
+import Layout from '../../../layouts/Layout.astro'
+import EventListPage from '../../../components/EventListPage.astro'
+import { getPublishedEvents } from '../../../lib/events'
+
+const events = await getPublishedEvents({ isIndoor: true })
+---
+
+<Layout
+  title="雨の日の東京イベント（屋内）| Seekigo"
+  description="雨の日でも楽しめる、東京の屋内イベント・展示・お出かけ情報を紹介します。"
+>
+  <EventListPage
+    breadcrumbCurrent="雨の日"
+    eyebrow="Rainy day"
+    headline="雨の日の東京イベント"
+    description="屋内で楽しめるイベントをまとめています。"
+    countLabel="屋内イベント"
+    events={events}
+    emptyMessage="現在掲載中の屋内イベントはありません。"
+  />
+</Layout>

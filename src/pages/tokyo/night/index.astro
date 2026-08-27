@@ -1,0 +1,22 @@
+---
+import Layout from '../../../layouts/Layout.astro'
+import EventListPage from '../../../components/EventListPage.astro'
+import { getPublishedEvents } from '../../../lib/events'
+
+const events = await getPublishedEvents({ isNight: true })
+---
+
+<Layout
+  title="夜の東京イベント | Seekigo"
+  description="夜に楽しめる東京のイベント・イルミネーション・お出かけ情報を紹介します。"
+>
+  <EventListPage
+    breadcrumbCurrent="夜"
+    eyebrow="Night"
+    headline="夜の東京イベント"
+    description="夜に開催されるイベントをまとめています。"
+    countLabel="夜のイベント"
+    events={events}
+    emptyMessage="現在掲載中の夜のイベントはありません。"
+  />
+</Layout>

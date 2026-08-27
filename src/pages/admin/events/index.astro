@@ -17,6 +17,10 @@ if (!import.meta.env.DEV) {
 
 const { createAdminClient } = await import('../../../lib/supabase-admin')
 const { getOrCreateAdminCsrfToken } = await import('../../../lib/admin-security')
+const { IMAGE_USAGE_STATUSES } = await import('../../../lib/event-image-usage')
+const { formatFieldValueForDisplay } = await import(
+  '../../../lib/event-field-review'
+)
 
 type AdminEvent = {
   id: number | string
@@ -32,6 +36,10 @@ type AdminEvent = {
   source_url: string | null
   official_url: string | null
   status: string | null
+  image_url?: string | null
+  image_usage_status?: string | null
+  image_source?: string | null
+  image_credit?: string | null
 }
 
 type IncomingPayload = {
@@ -72,6 +80,8 @@ const publishedTitle = Astro.url.searchParams.get('title')
 const bulkCount = Astro.url.searchParams.get('bulk')
 const reviewResult = Astro.url.searchParams.get('review')
 const reviewEventId = Astro.url.searchParams.get('event_id')
+const imageUpdated = Astro.url.searchParams.get('image')
+const imageStatus = Astro.url.searchParams.get('status')
 
 if (bulkCount && !message) {
   const n = Number(bulkCount)
@@ -88,24 +98,88 @@ if (bulkCount && !message) {
   message = `別イベントとして draft 登録しました (event_id=${reviewEventId ?? '?'})`
 } else if (reviewResult === 'rejected') {
   message = 'この候補を登録しない（rejected）にしました'
+} else if (imageUpdated === 'updated') {
+  message = `画像利用ステータスを更新しました (event_id=${reviewEventId ?? '?'}, status=${imageStatus ?? '?'})`
+} else if (Astro.url.searchParams.get('field') === 'accepted') {
+  message = `フィールド変更を採用しました (review_id=${Astro.url.searchParams.get('review_id') ?? '?'}, field=${Astro.url.searchParams.get('fname') ?? '?'})`
+} else if (Astro.url.searchParams.get('field') === 'rejected') {
+  message = `フィールド変更を却下しました (review_id=${Astro.url.searchParams.get('review_id') ?? '?'})`
+}
+
+type FieldReviewRow = {
+  id: number
+  event_id: number
+  source_name: string
+  source_url: string | null
+  field_name: string
+  current_value: unknown
+  proposed_value: unknown
+  status: string
+  reason: string | null
+  created_at: string | null
+  event_title?: string | null
+  event_slug?: string | null
 }
 
 let events: AdminEvent[] = []
+let publishedImageEvents: AdminEvent[] = []
 let reviews: ReviewRow[] = []
+let fieldReviews: FieldReviewRow[] = []
 let loadError: string | null = null
+
+const EVENT_SELECT_BASE =
+  'id, title, slug, area, start_date, end_date, venue, address, category, summary, source_url, official_url, status'
+const EVENT_SELECT_WITH_IMAGE =
+  `${EVENT_SELECT_BASE}, image_url, image_usage_status, image_source, image_credit`
 
 try {
   const admin = createAdminClient()
-  const { data, error } = await admin
-    .from('events')
-    .select(
-      'id, title, slug, area, start_date, end_date, venue, address, category, summary, source_url, official_url, status',
-    )
-    .eq('status', 'draft')
-    .order('start_date', { ascending: true })
 
-  if (error) throw error
-  events = (data ?? []) as AdminEvent[]
+  try {
+    const { data, error } = await admin
+      .from('events')
+      .select(EVENT_SELECT_WITH_IMAGE)
+      .eq('status', 'draft')
+      .order('start_date', { ascending: true })
+    if (error) throw error
+    events = (data ?? []) as AdminEvent[]
+  } catch (draftImgError) {
+    // カラム未追加時は従来カラムのみで継続
+    errorMessage =
+      (errorMessage ? `${errorMessage} / ` : '') +
+      `Draft image columns: ${
+        draftImgError instanceof Error
+          ? draftImgError.message
+          : String(draftImgError)
+      }`
+    const { data, error } = await admin
+      .from('events')
+      .select(EVENT_SELECT_BASE)
+      .eq('status', 'draft')
+      .order('start_date', { ascending: true })
+    if (error) throw error
+    events = (data ?? []) as AdminEvent[]
+  }
+
+  try {
+    const { data: pubImgs, error: pubErr } = await admin
+      .from('events')
+      .select(EVENT_SELECT_WITH_IMAGE)
+      .eq('status', 'published')
+      .not('image_url', 'is', null)
+      .order('id', { ascending: true })
+    if (pubErr) throw pubErr
+    publishedImageEvents = (pubImgs ?? []) as AdminEvent[]
+  } catch (pubLoadError) {
+    // カラム未追加時でも Draft Publish は使えるようにする
+    errorMessage =
+      (errorMessage ? `${errorMessage} / ` : '') +
+      `Published image load: ${
+        pubLoadError instanceof Error
+          ? pubLoadError.message
+          : String(pubLoadError)
+      }`
+  }
 
   try {
     const { data: reviewData, error: reviewError } = await admin
@@ -159,6 +233,57 @@ try {
           : String(reviewLoadError)
       }`
   }
+
+  try {
+    const { data: fieldData, error: fieldErr } = await admin
+      .from('event_field_reviews')
+      .select(
+        'id, event_id, source_name, source_url, field_name, current_value, proposed_value, status, reason, created_at',
+      )
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+
+    if (fieldErr) throw fieldErr
+
+    const pendingFields = (fieldData ?? []) as FieldReviewRow[]
+    const fieldEventIds = [
+      ...new Set(
+        pendingFields
+          .map((r) => Number(r.event_id))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    ]
+    const titlesById = new Map<number, { title: string | null; slug: string | null }>()
+    if (fieldEventIds.length > 0) {
+      const { data: evs, error: evErr } = await admin
+        .from('events')
+        .select('id, title, slug')
+        .in('id', fieldEventIds)
+      if (evErr) throw evErr
+      for (const e of evs ?? []) {
+        titlesById.set(Number(e.id), {
+          title: e.title ?? null,
+          slug: e.slug ?? null,
+        })
+      }
+    }
+    fieldReviews = pendingFields.map((r) => {
+      const meta = titlesById.get(Number(r.event_id))
+      return {
+        ...r,
+        event_title: meta?.title ?? null,
+        event_slug: meta?.slug ?? null,
+      }
+    })
+  } catch (fieldLoadError) {
+    errorMessage =
+      (errorMessage ? `${errorMessage} / ` : '') +
+      `Field review load: ${
+        fieldLoadError instanceof Error
+          ? fieldLoadError.message
+          : String(fieldLoadError)
+      }`
+  }
 } catch (error) {
   loadError = error instanceof Error ? error.message : String(error)
 }
@@ -181,6 +306,10 @@ function scoreText(scores: Record<string, unknown> | null | undefined): string {
 function displayVal(value: unknown): string {
   if (value == null || value === '') return '—'
   return String(value)
+}
+
+function usageStatusOf(event: AdminEvent): string {
+  return event.image_usage_status?.trim() || 'unknown'
 }
 ---
 
@@ -206,7 +335,8 @@ function displayVal(value: unknown): string {
         <p>
           <a href="/tokyo/">公開一覧 /tokyo/ を開く</a>
           · draft {events.length} 件
-          · pending review {reviews.length} 件
+          · pending dedupe {reviews.length} 件
+          · pending field {fieldReviews.length} 件
         </p>
       </header>
 
@@ -434,6 +564,92 @@ function displayVal(value: unknown): string {
 
       <hr class="divider" />
 
+      <section class="review-section" id="field-reviews">
+        <h2>公開済みイベント 変更候補</h2>
+        <p class="section-note">
+          published exact 時のフィールド差分のみ。sync は本体を変更しません。1項目ずつ採用 / 却下してください。
+          summary / title / image は対象外です。
+        </p>
+
+        {fieldReviews.length === 0 && (
+          <p>現在、pending の変更候補はありません。</p>
+        )}
+
+        <div class="field-review-list">
+          {fieldReviews.map((fr) => (
+            <article class="field-review-card">
+              <div class="field-review-meta">
+                <span class="badge badge-field">{fr.field_name}</span>
+                <span class="meta-item">source: {fr.source_name}</span>
+                <span class="meta-item">event_id: {String(fr.event_id)}</span>
+                {fr.event_slug && (
+                  <span class="meta-item">
+                    <a href={`/tokyo/event/${fr.event_slug}/`} target="_blank" rel="noopener noreferrer">
+                      {fr.event_slug}
+                    </a>
+                  </span>
+                )}
+              </div>
+              <h3 class="field-review-title">
+                {fr.event_title ?? `(event ${fr.event_id})`}
+              </h3>
+              {fr.reason && <p class="reason">{fr.reason}</p>}
+              {fr.source_url && (
+                <p class="meta-item">
+                  source_url:{' '}
+                  <a
+                    href={fr.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {fr.source_url}
+                  </a>
+                </p>
+              )}
+              <div class="field-diff">
+                <div class="field-diff__col field-diff__col--current">
+                  <h4>現在値</h4>
+                  <pre class="field-diff__value">{formatFieldValueForDisplay(fr.current_value)}</pre>
+                </div>
+                <div class="field-diff__arrow" aria-hidden="true">→</div>
+                <div class="field-diff__col field-diff__col--proposed">
+                  <h4>新しい値</h4>
+                  <pre class="field-diff__value">{formatFieldValueForDisplay(fr.proposed_value)}</pre>
+                </div>
+              </div>
+              <div class="review-actions">
+                <form method="POST" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="field_accept" />
+                  <input
+                    type="hidden"
+                    name="review_id"
+                    value={String(fr.id)}
+                  />
+                  <button type="submit" class="btn-create">
+                    この変更を採用
+                  </button>
+                </form>
+                <form method="POST" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="field_reject" />
+                  <input
+                    type="hidden"
+                    name="review_id"
+                    value={String(fr.id)}
+                  />
+                  <button type="submit" class="btn-reject">
+                    この変更を却下
+                  </button>
+                </form>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <hr class="divider" />
+
       <section>
         <h2>Draft 一覧</h2>
 
@@ -548,6 +764,83 @@ function displayVal(value: unknown): string {
                 </div>
               </dl>
 
+              <div class="image-meta">
+                <h3>画像利用</h3>
+                <dl class="image-dl">
+                  <div>
+                    <dt>image_url</dt>
+                    <dd>
+                      {event.image_url ? (
+                        <a
+                          href={event.image_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {event.image_url}
+                        </a>
+                      ) : (
+                        'null'
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>image_source</dt>
+                    <dd>{displayVal(event.image_source)}</dd>
+                  </div>
+                  <div>
+                    <dt>image_usage_status</dt>
+                    <dd>{displayVal(event.image_usage_status ?? 'unknown')}</dd>
+                  </div>
+                  <div>
+                    <dt>image_credit</dt>
+                    <dd>{displayVal(event.image_credit)}</dd>
+                  </div>
+                </dl>
+                <p class="image-note">
+                  管理画面でも画像は自動表示しません（hotlink 回避）。
+                </p>
+                <form method="POST" class="image-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input
+                    type="hidden"
+                    name="intent"
+                    value="image_usage_update"
+                  />
+                  <input
+                    type="hidden"
+                    name="event_id"
+                    value={String(event.id)}
+                  />
+                  {event.image_source && (
+                    <input
+                      type="hidden"
+                      name="image_source"
+                      value={event.image_source}
+                    />
+                  )}
+                  <label>
+                    利用状態
+                    <select name="image_usage_status" class="usage-select">
+                      {IMAGE_USAGE_STATUSES.map((s) => (
+                        <option value={s} selected={usageStatusOf(event) === s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label class="credit-field">
+                    image_credit（licensed / organizer_granted 時のみ任意）
+                    <input
+                      type="text"
+                      name="image_credit"
+                      value={event.image_credit ?? ''}
+                      placeholder="クレジット表記"
+                    />
+                  </label>
+                  <button type="submit">画像利用を更新</button>
+                </form>
+              </div>
+
               <form method="POST" class="publish-form">
                 <input type="hidden" name="csrf_token" value={csrfToken} />
                 <input type="hidden" name="intent" value="publish" />
@@ -559,6 +852,115 @@ function displayVal(value: unknown): string {
         ))}
       </div>
       </section>
+
+      {publishedImageEvents.length > 0 && (
+        <>
+          <hr class="divider" />
+          <section>
+            <h2>Published 画像ステータス（手動のみ）</h2>
+            <p class="hint">
+              sync は published の image_* を変更しません。利用許諾の確定はここでのみ行います。画像は表示しません。
+            </p>
+            <div class="list">
+              {publishedImageEvents.map((event) => (
+                <article class="card card--published-image">
+                  <div class="card-body">
+                    <h2>
+                      {event.title}
+                      <span class="pub-badge">published</span>
+                    </h2>
+                    <dl class="image-dl">
+                      <div>
+                        <dt>id / slug</dt>
+                        <dd>
+                          {String(event.id)} / {displayVal(event.slug)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>image_url</dt>
+                        <dd>
+                          {event.image_url ? (
+                            <a
+                              href={event.image_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {event.image_url}
+                            </a>
+                          ) : (
+                            'null'
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>image_source</dt>
+                        <dd>{displayVal(event.image_source)}</dd>
+                      </div>
+                      <div>
+                        <dt>image_usage_status</dt>
+                        <dd>
+                          {displayVal(event.image_usage_status ?? 'unknown')}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>image_credit</dt>
+                        <dd>{displayVal(event.image_credit)}</dd>
+                      </div>
+                    </dl>
+                    <form method="POST" class="image-form">
+                      <input
+                        type="hidden"
+                        name="csrf_token"
+                        value={csrfToken}
+                      />
+                      <input
+                        type="hidden"
+                        name="intent"
+                        value="image_usage_update"
+                      />
+                      <input
+                        type="hidden"
+                        name="event_id"
+                        value={String(event.id)}
+                      />
+                      {event.image_source && (
+                        <input
+                          type="hidden"
+                          name="image_source"
+                          value={event.image_source}
+                        />
+                      )}
+                      <label>
+                        利用状態
+                        <select name="image_usage_status" class="usage-select">
+                          {IMAGE_USAGE_STATUSES.map((s) => (
+                            <option
+                              value={s}
+                              selected={usageStatusOf(event) === s}
+                            >
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label class="credit-field">
+                        image_credit（licensed / organizer_granted 時のみ任意）
+                        <input
+                          type="text"
+                          name="image_credit"
+                          value={event.image_credit ?? ''}
+                          placeholder="クレジット表記"
+                        />
+                      </label>
+                      <button type="submit">画像利用を更新</button>
+                    </form>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
     </main>
 
     <script>
@@ -628,9 +1030,31 @@ function displayVal(value: unknown): string {
             msg = '別イベントとして draft を新規登録します。よろしいですか？'
           } else if (intent === 'dedupe_reject') {
             msg = 'この候補を登録しない（rejected）にします。よろしいですか？'
+          } else if (intent === 'field_accept') {
+            msg =
+              'この変更を published イベントへ反映します。よろしいですか？'
+          } else if (intent === 'field_reject') {
+            msg =
+              'この変更を却下します（本体は変更しません）。よろしいですか？'
           }
           if (!confirm(msg)) e.preventDefault()
         })
+      }
+
+      function syncCreditVisibility(form: HTMLFormElement) {
+        const select = form.querySelector<HTMLSelectElement>('.usage-select')
+        const credit = form.querySelector<HTMLElement>('.credit-field')
+        if (!select || !credit) return
+        const show =
+          select.value === 'licensed' || select.value === 'organizer_granted'
+        credit.hidden = !show
+      }
+      for (const form of document.querySelectorAll<HTMLFormElement>(
+        '.image-form',
+      )) {
+        const select = form.querySelector<HTMLSelectElement>('.usage-select')
+        select?.addEventListener('change', () => syncCreditVisibility(form))
+        syncCreditVisibility(form)
       }
 
       refresh()
@@ -883,5 +1307,163 @@ function displayVal(value: unknown): string {
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
     border: 0;
+  }
+
+  .hint {
+    color: #555;
+    font-size: 0.95rem;
+  }
+
+  .image-meta {
+    margin: 1rem 0;
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    background: #fafafa;
+  }
+
+  .image-meta h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+
+  .image-dl {
+    margin: 0 0 0.5rem;
+  }
+
+  .image-dl div {
+    margin-bottom: 0.35rem;
+  }
+
+  .image-dl dt {
+    font-size: 0.75rem;
+    color: #666;
+  }
+
+  .image-dl dd {
+    margin: 0;
+    word-break: break-all;
+    font-size: 0.9rem;
+  }
+
+  .image-note {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: #666;
+  }
+
+  .image-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .image-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+  }
+
+  .image-form input[type='text'],
+  .image-form select {
+    min-width: min(100%, 28rem);
+    padding: 0.35rem 0.5rem;
+  }
+
+  .pub-badge {
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #0a7a32;
+    vertical-align: middle;
+  }
+
+  .card--published-image {
+    grid-template-columns: 1fr;
+  }
+
+  .field-review-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .field-review-card {
+    border: 1px solid #cfd8e3;
+    background: #fffdf8;
+    padding: 1rem;
+  }
+
+  .field-review-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .badge-field {
+    background: #e8f1ff;
+    color: #0b6bcb;
+  }
+
+  .field-review-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+  }
+
+  .field-diff {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.75rem;
+    align-items: stretch;
+    margin: 0.75rem 0;
+  }
+
+  @media (max-width: 700px) {
+    .field-diff {
+      grid-template-columns: 1fr;
+    }
+
+    .field-diff__arrow {
+      display: none;
+    }
+  }
+
+  .field-diff__col {
+    border: 1px solid #e2e8f0;
+    padding: 0.5rem 0.75rem;
+    background: #fff;
+    min-width: 0;
+  }
+
+  .field-diff__col--current {
+    border-color: #f0c2c2;
+    background: #fff7f7;
+  }
+
+  .field-diff__col--proposed {
+    border-color: #b7e0c2;
+    background: #f4fff7;
+  }
+
+  .field-diff__col h4 {
+    margin: 0 0 0.35rem;
+    font-size: 0.85rem;
+    color: #555;
+  }
+
+  .field-diff__value {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9rem;
+  }
+
+  .field-diff__arrow {
+    align-self: center;
+    font-size: 1.25rem;
+    color: #666;
   }
 </style>

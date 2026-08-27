@@ -1,36 +1,22 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
+import EventListPage from '../../../components/EventListPage.astro'
 import { getKidsEvents } from '../../../lib/events'
-import EventCard from '../../../components/EventCard.astro'
 
 const events = await getKidsEvents()
 ---
 
 <Layout
-  title="東京の子ども向けイベント | Seekigo"
+  title="子どもと楽しめる東京イベント | Seekigo"
   description="東京で開催される子ども向けのイベント・お祭り・展示・お出かけ情報を紹介します。"
 >
-  <main>
-    <p>
-      <a href="/tokyo/">東京イベントTOP</a>
-    </p>
-
-    <header>
-      <h1>東京の子ども向けイベント</h1>
-    </header>
-
-    <section>
-      <h2>子どもと楽しめるイベント</h2>
-
-      {events.length > 0 ? (
-        <div>
-          {events.map((event) => (
-            <EventCard event={event} />
-          ))}
-        </div>
-      ) : (
-        <p>現在掲載中の子ども向けイベントはありません。</p>
-      )}
-    </section>
-  </main>
+  <EventListPage
+    breadcrumbCurrent="子どもと"
+    eyebrow="With kids"
+    headline="子どもと楽しめる東京イベント"
+    description="家族や子どもと一緒に楽しめる、東京のイベントをまとめています。"
+    countLabel="子ども向けイベント"
+    events={events}
+    emptyMessage="現在掲載中の子ども向けイベントはありません。"
+  />
 </Layout>

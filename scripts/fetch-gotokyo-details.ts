@@ -13,6 +13,20 @@ import * as cheerio from 'cheerio'
 import type { CheerioAPI } from 'cheerio'
 import { getGotokyoLimit } from './lib/gotokyo-limit'
 import { cleanAddressAccess } from '../src/lib/event-field-rules'
+import {
+  collectHtmlImageCandidates,
+  extractJsonLdImageUrl,
+  logEventImageResolve,
+  resolveEventImage,
+  type EventImageResolveResult,
+} from '../src/lib/event-image-rules'
+import {
+  extractLabeledTimeRawFromText,
+  extractTimeFromIsoDateTime,
+  logEventTimeParse,
+  parseEventTimeText,
+  type EventTimeParseResult,
+} from '../src/lib/event-time-rules'
 
 config()
 
@@ -73,6 +87,19 @@ type GotokyoEventDetail = {
   image_url: string | null
   source_url: string
   field_sources: FieldSources
+  /** tmp debug: 取得できた時間テキストと判定 */
+  time_debug?: {
+    raw: string | null
+    action: string
+    reason: string | null
+    source: string | null
+  } | null
+  /** tmp debug: 画像取得元 */
+  image_debug?: {
+    source: string | null
+    action: string
+    reason: string | null
+  } | null
   notes: string[]
   error: string | null
 }
@@ -127,13 +154,6 @@ function parseYmd(value: string | null | undefined): string | null {
   }
 
   return null
-}
-
-function parseHm(value: string | null | undefined): string | null {
-  if (!value) return null
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})$/)
-  if (!m) return null
-  return `${m[1].padStart(2, '0')}:${m[2]}`
 }
 
 function parseJpDateRange(
@@ -204,8 +224,9 @@ function firstWithSource(
 function extractLabeledValues($: CheerioAPI): {
   start_date: string | null
   end_date: string | null
-  start_time: string | null
-  end_time: string | null
+  time_raw: string | null
+  time_parse: EventTimeParseResult | null
+  time_source: string | null
   address: string | null
   sources: FieldSources
   notes: string[]
@@ -214,8 +235,9 @@ function extractLabeledValues($: CheerioAPI): {
   const notes: string[] = []
   let start_date: string | null = null
   let end_date: string | null = null
-  let start_time: string | null = null
-  let end_time: string | null = null
+  let time_raw: string | null = null
+  let time_parse: EventTimeParseResult | null = null
+  let time_source: string | null = null
   let address: string | null = null
 
   const pairs: Array<{ label: string; value: string; where: string }> = []
@@ -239,6 +261,9 @@ function extractLabeledValues($: CheerioAPI): {
       `detail page has update date only (${updateText}) — not used as start_date/end_date`,
     )
   }
+
+  const TIME_LABEL =
+    /開催時間|開館時間|営業時間|開催時刻|開始時間|開演時間|開場時間|^時間$/
 
   for (const pair of pairs) {
     const { label, value, where } = pair
@@ -264,18 +289,17 @@ function extractLabeledValues($: CheerioAPI): {
       }
     }
 
-    if (/開催時間|開館時間|開場時間|時間/.test(label) && !/料金|金額/.test(label)) {
-      const times = value.match(/\d{1,2}:\d{2}/g)
-      if (times?.length === 1) {
-        // 単一時刻だけでは開始/終了を確定できない
-        notes.push(`single time under "${label}" left null: ${times[0]}`)
-      } else if (times?.length === 2) {
-        start_time = parseHm(times[0])
-        end_time = parseHm(times[1])
-        sources.start_time = where
-        sources.end_time = where
-      } else if (times && times.length > 2) {
-        notes.push(`multiple times under "${label}" left null: ${value.slice(0, 80)}`)
+    if (TIME_LABEL.test(label) && !/料金|金額/.test(label) && !time_raw) {
+      time_raw = value
+      time_parse = parseEventTimeText(value)
+      time_source = where
+      if (time_parse.action === 'parsed') {
+        if (time_parse.start_time) sources.start_time = where
+        if (time_parse.end_time) sources.end_time = where
+      } else {
+        notes.push(
+          `time ${time_parse.action}: ${time_parse.reason} raw="${value.slice(0, 80)}"`,
+        )
       }
     }
 
@@ -285,7 +309,34 @@ function extractLabeledValues($: CheerioAPI): {
     }
   }
 
-  return { start_date, end_date, start_time, end_time, address, sources, notes }
+  // テーブルに無い場合、本文のラベル付き時間を試す
+  if (!time_raw) {
+    const bodyRaw = extractLabeledTimeRawFromText($.root().text())
+    if (bodyRaw) {
+      time_raw = bodyRaw
+      time_parse = parseEventTimeText(bodyRaw)
+      time_source = 'body labeled time'
+      if (time_parse.action === 'parsed') {
+        if (time_parse.start_time) sources.start_time = time_source
+        if (time_parse.end_time) sources.end_time = time_source
+      } else {
+        notes.push(
+          `body time ${time_parse.action}: ${time_parse.reason} raw="${bodyRaw.slice(0, 80)}"`,
+        )
+      }
+    }
+  }
+
+  return {
+    start_date,
+    end_date,
+    time_raw,
+    time_parse,
+    time_source,
+    address,
+    sources,
+    notes,
+  }
 }
 
 function extractJsonLdFields(
@@ -322,8 +373,7 @@ function extractJsonLdFields(
         if (typeof obj.startDate === 'string' && !values.start_date) {
           const d = obj.startDate.slice(0, 10)
           values.start_date = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
-          const time = obj.startDate.match(/T(\d{2}:\d{2})/)?.[1]
-          values.start_time ??= parseHm(time)
+          values.start_time ??= extractTimeFromIsoDateTime(obj.startDate)
           if (values.start_date) {
             sources.start_date = 'script[type=application/ld+json].startDate'
           }
@@ -334,8 +384,7 @@ function extractJsonLdFields(
         if (typeof obj.endDate === 'string' && !values.end_date) {
           const d = obj.endDate.slice(0, 10)
           values.end_date = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
-          const time = obj.endDate.match(/T(\d{2}:\d{2})/)?.[1]
-          values.end_time ??= parseHm(time)
+          values.end_time ??= extractTimeFromIsoDateTime(obj.endDate)
           if (values.end_date) {
             sources.end_date = 'script[type=application/ld+json].endDate'
           }
@@ -348,12 +397,10 @@ function extractJsonLdFields(
           sources.official_url = 'script[type=application/ld+json].url'
         }
         if (!values.image_url) {
-          if (typeof obj.image === 'string') {
-            values.image_url = toAbsoluteUrl(obj.image, pageUrl)
+          const img = extractJsonLdImageUrl(obj.image, pageUrl)
+          if (img) {
+            values.image_url = img
             sources.image_url = 'script[type=application/ld+json].image'
-          } else if (Array.isArray(obj.image) && typeof obj.image[0] === 'string') {
-            values.image_url = toAbsoluteUrl(obj.image[0], pageUrl)
-            sources.image_url = 'script[type=application/ld+json].image[0]'
           }
         }
 
@@ -517,35 +564,129 @@ function extractDetailFromHtml(
     },
   ])
 
-  const pageImage =
-    toAbsoluteUrl(
-      $('img[src]')
-        .filter((_, img) => /\/spot\/(ex|ev)\d+\//i.test($(img).attr('src') ?? ''))
-        .first()
-        .attr('src') ?? null,
-      pageUrl,
-    ) ?? null
+  const ogImage = $('meta[property="og:image"]').attr('content') ?? null
+  const twitterImage =
+    $('meta[name="twitter:image"]').attr('content') ??
+    $('meta[property="twitter:image"]').attr('content') ??
+    null
 
-  const image = firstWithSource([
-    { value: ld.values.image_url, source: 'script[type=application/ld+json].image' },
-    {
-      value: pageImage,
-      source: 'img[src*="/spot/ex|ev"]',
-    },
-  ])
+  const htmlCandidates = collectHtmlImageCandidates(
+    $('img[src]')
+      .toArray()
+      .map((el) => {
+        const $el = $(el)
+        return {
+          src: $el.attr('src') ?? null,
+          width: $el.attr('width') ?? null,
+          height: $el.attr('height') ?? null,
+          className: $el.attr('class') ?? null,
+          alt: $el.attr('alt') ?? null,
+        }
+      }),
+  )
+
+  // JSON-LD で既に取れていれば優先。サイト共通 ogp は helper 側で除外。
+  const imageResolved: EventImageResolveResult = ld.values.image_url
+    ? {
+        image_url: ld.values.image_url,
+        source: 'jsonld',
+        source_detail: 'script[type=application/ld+json].image',
+        action: 'parsed',
+        reason: null,
+      }
+    : resolveEventImage({
+        pageUrl,
+        ogImage,
+        twitterImage,
+        htmlCandidates,
+      })
+
+  logEventImageResolve({ title: title.value, result: imageResolved })
+  const image_debug = {
+    source: imageResolved.source,
+    action: imageResolved.action,
+    reason: imageResolved.reason,
+  }
+  if (imageResolved.image_url && imageResolved.source_detail) {
+    field_sources.image_url = imageResolved.source_detail
+  }
 
   let start_date = ld.values.start_date ?? labeled.start_date
   let end_date = ld.values.end_date ?? labeled.end_date
-  let start_time = ld.values.start_time ?? labeled.start_time
-  let end_time = ld.values.end_time ?? labeled.end_time
   let address = ld.values.address ?? labeled.address
+
+  // 時刻: JSON-LD datetime 優先。無い場合のみテーブル/本文。
+  let start_time = ld.values.start_time ?? null
+  let end_time = ld.values.end_time ?? null
+  let time_debug: GotokyoEventDetail['time_debug'] = null
+
+  if (start_time || end_time) {
+    time_debug = {
+      raw: null,
+      action: 'parsed',
+      reason: 'json_ld_datetime',
+      source: field_sources.start_time ?? field_sources.end_time ?? null,
+    }
+    logEventTimeParse({
+      title: title.value,
+      source: time_debug.source,
+      result: {
+        start_time,
+        end_time,
+        action: 'parsed',
+        reason: 'json_ld_datetime',
+        raw: null,
+        ranges_found: start_time && end_time ? 1 : 0,
+      },
+    })
+  } else if (labeled.time_parse) {
+    const tp = labeled.time_parse
+    time_debug = {
+      raw: labeled.time_raw,
+      action: tp.action,
+      reason: tp.reason,
+      source: labeled.time_source,
+    }
+    if (tp.action === 'parsed') {
+      start_time = tp.start_time
+      end_time = tp.end_time
+      if (tp.start_time && labeled.time_source) {
+        field_sources.start_time = labeled.time_source
+      }
+      if (tp.end_time && labeled.time_source) {
+        field_sources.end_time = labeled.time_source
+      }
+    }
+    logEventTimeParse({
+      title: title.value,
+      source: labeled.time_source,
+      result: tp,
+    })
+  } else {
+    time_debug = {
+      raw: null,
+      action: 'not_found',
+      reason: 'no_time_source',
+      source: null,
+    }
+    logEventTimeParse({
+      title: title.value,
+      result: {
+        start_time: null,
+        end_time: null,
+        action: 'not_found',
+        reason: 'no_time_source',
+        raw: null,
+        ranges_found: 0,
+      },
+    })
+  }
 
   if (title.source) field_sources.title = title.source
   if (description.source) field_sources.description = description.source
   if (venue.source) field_sources.venue = venue.source
   if (price.source) field_sources.price_text = price.source
   if (official.source) field_sources.official_url = official.source
-  if (image.source) field_sources.image_url = image.source
 
   // 詳細ページに開催期間が無い場合、一覧 HTML を spot ID で突合
   const spotId = spotIdFromUrl(pageUrl)
@@ -597,9 +738,11 @@ function extractDetailFromHtml(
     address,
     price_text: price.value,
     official_url: official.value,
-    image_url: image.value,
+    image_url: imageResolved.image_url,
     source_url: pageUrl,
     field_sources,
+    time_debug,
+    image_debug,
     notes,
     error: null,
   }
@@ -620,6 +763,8 @@ function emptyDetail(sourceUrl: string, error: string): GotokyoEventDetail {
     image_url: null,
     source_url: sourceUrl,
     field_sources: {},
+    time_debug: null,
+    image_debug: null,
     notes: [],
     error,
   }
@@ -757,6 +902,45 @@ async function main() {
     events: details,
   }
   await writeFile(detailsJsonPath, JSON.stringify(payload, null, 2), 'utf8')
+
+  const startCount = details.filter((d) => d.start_time).length
+  const endCount = details.filter((d) => d.end_time).length
+  const ambiguous = details.filter(
+    (d) =>
+      d.time_debug?.action === 'keep_null' ||
+      (d.notes ?? []).some((n) => /multiple_time|exception_day|ambiguous/.test(n)),
+  ).length
+  const notFound = details.filter(
+    (d) =>
+      !d.start_time &&
+      !d.end_time &&
+      (d.time_debug?.action === 'not_found' || !d.time_debug?.raw),
+  ).length
+  console.log('[fetch-gotokyo-details] ---- time summary ----')
+  console.log(`[fetch-gotokyo-details] total: ${details.length}`)
+  console.log(`[fetch-gotokyo-details] start_time: ${startCount}`)
+  console.log(`[fetch-gotokyo-details] end_time: ${endCount}`)
+  console.log(`[fetch-gotokyo-details] ambiguous: ${ambiguous}`)
+  console.log(`[fetch-gotokyo-details] not_found: ${notFound}`)
+
+  const imageCount = details.filter((d) => d.image_url).length
+  const bySource = {
+    jsonld: details.filter((d) => d.image_debug?.source === 'jsonld').length,
+    og: details.filter((d) => d.image_debug?.source === 'og:image').length,
+    twitter: details.filter((d) => d.image_debug?.source === 'twitter:image')
+      .length,
+    html: details.filter((d) => d.image_debug?.source === 'html').length,
+    not_found: details.filter((d) => !d.image_url).length,
+  }
+  console.log('[fetch-gotokyo-details] ---- image summary ----')
+  console.log(`[fetch-gotokyo-details] total: ${details.length}`)
+  console.log(`[fetch-gotokyo-details] image_url: ${imageCount}`)
+  console.log(`[fetch-gotokyo-details] jsonld: ${bySource.jsonld}`)
+  console.log(`[fetch-gotokyo-details] og:image: ${bySource.og}`)
+  console.log(`[fetch-gotokyo-details] twitter:image: ${bySource.twitter}`)
+  console.log(`[fetch-gotokyo-details] html fallback: ${bySource.html}`)
+  console.log(`[fetch-gotokyo-details] not_found: ${bySource.not_found}`)
+
   console.log(
     `[fetch-gotokyo-details] saved ${path.relative(rootDir, detailsJsonPath)} (gitignored)`,
   )

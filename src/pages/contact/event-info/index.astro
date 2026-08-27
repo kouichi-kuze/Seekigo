@@ -1,0 +1,612 @@
+---
+/**
+ * 主催者・関係者向け 掲載／情報提供フォーム。
+ * Turnstile + Xserver PHP（/api/contact-event.php）へ POST 送信。
+ * ?event=/tokyo/event/slug/ で対象URLを初期入力（クライアント側）。
+ */
+import Layout from '../../../layouts/Layout.astro'
+
+const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? ''
+
+const topics = [
+  { value: 'correction', label: '掲載内容の修正' },
+  { value: 'official_image', label: '公式画像の提供' },
+  { value: 'additional_info', label: '情報の追加' },
+  { value: 'new_event', label: '新規掲載の相談' },
+  { value: 'other', label: 'その他' },
+] as const
+
+const allowedTopics = topics.map((t) => t.value)
+---
+
+<Layout
+  title="イベント掲載・情報提供について | Seekigo"
+  description="Seekigoへのイベント掲載内容の確認、公式画像のご提供、情報の追加・変更、新規掲載のご相談窓口です。"
+  robots="noindex"
+>
+  <main class="contact-page">
+    <div class="contact-inner">
+      <nav class="contact-breadcrumb" aria-label="パンくず">
+        <a href="/tokyo/">東京のイベント</a>
+        <span aria-hidden="true">›</span>
+        <span aria-current="page">掲載・情報提供</span>
+      </nav>
+
+      <header class="contact-header">
+        <p class="contact-eyebrow">For organizers</p>
+        <h1 class="contact-title">イベント掲載・情報提供について</h1>
+        <p class="contact-lead">
+          イベント主催者・施設運営者・広報担当者・関係者の皆さまと、
+          掲載情報を一緒に整えていくための窓口です。
+        </p>
+      </header>
+
+      <form class="contact-form" id="event-info-form" novalidate>
+        {/* honeypot — 人間には非表示 */}
+        <div class="hp" aria-hidden="true">
+          <label>
+            ホームページ
+            <input
+              type="text"
+              name="company_website"
+              tabindex="-1"
+              autocomplete="off"
+            />
+          </label>
+        </div>
+
+        <div class="field">
+          <label for="name">お名前 <span class="req">必須</span></label>
+          <input
+            id="name"
+            name="name"
+            type="text"
+            required
+            autocomplete="name"
+            maxlength="120"
+          />
+        </div>
+
+        <div class="field">
+          <label for="org">団体名 / 主催者名 <span class="req">必須</span></label>
+          <input
+            id="org"
+            name="organization"
+            type="text"
+            required
+            autocomplete="organization"
+            maxlength="200"
+          />
+        </div>
+
+        <div class="field">
+          <label for="email">メールアドレス <span class="req">必須</span></label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            required
+            autocomplete="email"
+            maxlength="200"
+            inputmode="email"
+          />
+        </div>
+
+        <div class="field">
+          <label for="event_url">対象イベントURL</label>
+          <input
+            id="event_url"
+            name="event_url"
+            type="url"
+            inputmode="url"
+            maxlength="500"
+            placeholder="https://seekigo.com/tokyo/event/..."
+          />
+          <p class="hint">
+            Seekigo上のイベントページURLがあればご記入ください（任意）。
+          </p>
+        </div>
+
+        <fieldset class="field field--topic">
+          <legend>ご連絡内容 <span class="req">必須</span></legend>
+          <div class="topic-list" role="radiogroup" aria-label="ご連絡内容">
+            {topics.map((t, i) => (
+              <label class="topic-option">
+                <input
+                  type="radio"
+                  name="topic"
+                  value={t.value}
+                  required={i === 0}
+                />
+                <span>{t.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <div class="field">
+          <label for="message">メッセージ <span class="req">必須</span></label>
+          <textarea
+            id="message"
+            name="message"
+            required
+            rows="7"
+            maxlength="4000"
+            placeholder="掲載内容の確認点や、追加したい情報など、ご自由にお書きください。"
+          ></textarea>
+        </div>
+
+        <div class="notice" role="note">
+          <p>
+            画像提供をご希望の場合は、その旨をご記載ください。
+            確認後、受け渡し方法をご案内します。
+          </p>
+        </div>
+
+        {turnstileSiteKey ? (
+          <div class="turnstile-wrap">
+            <div id="turnstile-widget" aria-label="スパム対策"></div>
+          </div>
+        ) : (
+          <p class="turnstile-missing" role="alert">
+            フォーム送信の準備が完了していません（Site Key 未設定）。
+          </p>
+        )}
+
+        <p class="form-error hidden" id="form-error" role="alert"></p>
+        <p class="form-success hidden" id="form-success" role="status"></p>
+
+        <button
+          type="submit"
+          class="submit-btn"
+          id="submit-btn"
+          disabled={!turnstileSiteKey}
+        >
+          送信する
+        </button>
+      </form>
+
+      <p class="contact-back">
+        <a href="/tokyo/">← 東京のイベント一覧に戻る</a>
+      </p>
+    </div>
+  </main>
+</Layout>
+
+{turnstileSiteKey && (
+  <script
+    src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+    async
+    defer
+  ></script>
+)}
+
+<script define:vars={{ turnstileSiteKey, allowedTopics }}>
+  const form = document.getElementById('event-info-form')
+  const eventUrlInput = document.getElementById('event_url')
+  const errorEl = document.getElementById('form-error')
+  const successEl = document.getElementById('form-success')
+  const submitBtn = document.getElementById('submit-btn')
+
+  const SUCCESS_MSG =
+    'お問い合わせを受け付けました。内容を確認のうえ、必要に応じてご連絡いたします。'
+  const ERROR_MSG =
+    '送信できませんでした。時間をおいてもう一度お試しください。'
+
+  /** @type {number | null} */
+  let turnstileWidgetId = null
+
+  /** ?event=/tokyo/event/xxx/ → 絶対URLに変換して初期値へ */
+  function prefillEventUrl() {
+    if (!eventUrlInput) return
+    const params = new URLSearchParams(window.location.search)
+    const raw = params.get('event')?.trim()
+    if (!raw) return
+
+    try {
+      if (/^https?:\/\//i.test(raw)) {
+        eventUrlInput.value = raw
+        return
+      }
+      const path = raw.startsWith('/') ? raw : `/${raw}`
+      eventUrlInput.value = new URL(path, window.location.origin).href
+    } catch {
+      // 不正な値は無視
+    }
+  }
+
+  function showError(msg) {
+    if (errorEl) {
+      errorEl.textContent = msg
+      errorEl.classList.remove('hidden')
+    }
+    successEl?.classList.add('hidden')
+  }
+
+  function showSuccess(msg) {
+    if (successEl) {
+      successEl.textContent = msg
+      successEl.classList.remove('hidden')
+    }
+    errorEl?.classList.add('hidden')
+  }
+
+  function clearMessages() {
+    errorEl?.classList.add('hidden')
+    successEl?.classList.add('hidden')
+  }
+
+  function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  }
+
+  function isValidOptionalUrl(value) {
+    if (!value) return true
+    try {
+      const u = new URL(value)
+      return u.protocol === 'http:' || u.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }
+
+  function getTurnstileToken() {
+    const input = form?.querySelector(
+      'input[name="cf-turnstile-response"]',
+    )
+    return input instanceof HTMLInputElement ? input.value.trim() : ''
+  }
+
+  function resetTurnstile() {
+    if (
+      turnstileWidgetId !== null &&
+      typeof turnstile !== 'undefined' &&
+      typeof turnstile.reset === 'function'
+    ) {
+      turnstile.reset(turnstileWidgetId)
+    }
+  }
+
+  function initTurnstile() {
+    if (!turnstileSiteKey) return
+
+    const mount = () => {
+      const container = document.getElementById('turnstile-widget')
+      if (!container || typeof turnstile === 'undefined') return
+      if (turnstileWidgetId !== null) return
+
+      turnstileWidgetId = turnstile.render('#turnstile-widget', {
+        sitekey: turnstileSiteKey,
+        action: 'contact_event',
+      })
+    }
+
+    if (typeof turnstile !== 'undefined') {
+      mount()
+    } else {
+      window.addEventListener('load', mount, { once: true })
+    }
+  }
+
+  function setSubmitting(isSubmitting) {
+    if (submitBtn instanceof HTMLButtonElement) {
+      submitBtn.disabled = isSubmitting || !turnstileSiteKey
+      submitBtn.textContent = isSubmitting ? '送信中…' : '送信する'
+    }
+  }
+
+  prefillEventUrl()
+  initTurnstile()
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    if (!(form instanceof HTMLFormElement)) return
+
+    clearMessages()
+
+    const fd = new FormData(form)
+
+    // honeypot
+    if (String(fd.get('company_website') ?? '').trim()) {
+      showSuccess(SUCCESS_MSG)
+      form.reset()
+      prefillEventUrl()
+      resetTurnstile()
+      return
+    }
+
+    const name = String(fd.get('name') ?? '').trim()
+    const org = String(fd.get('organization') ?? '').trim()
+    const email = String(fd.get('email') ?? '').trim()
+    const eventUrl = String(fd.get('event_url') ?? '').trim()
+    const topic = String(fd.get('topic') ?? '').trim()
+    const message = String(fd.get('message') ?? '').trim()
+
+    if (!name || !org || !email || !topic || !message) {
+      showError('必須項目をご確認ください。')
+      return
+    }
+    if (name.length > 120 || org.length > 200 || email.length > 200) {
+      showError('入力文字数が上限を超えています。')
+      return
+    }
+    if (!isValidEmail(email)) {
+      showError('メールアドレスの形式をご確認ください。')
+      return
+    }
+    if (!isValidOptionalUrl(eventUrl) || eventUrl.length > 500) {
+      showError('対象イベントURLは http(s) で始まる形式でご記入ください。')
+      return
+    }
+    if (!allowedTopics.includes(topic)) {
+      showError('ご連絡内容を選択してください。')
+      return
+    }
+    if (message.length > 4000) {
+      showError('メッセージが長すぎます。')
+      return
+    }
+
+    const turnstileToken = getTurnstileToken()
+    if (!turnstileToken) {
+      showError(ERROR_MSG)
+      return
+    }
+
+    fd.set('cf-turnstile-response', turnstileToken)
+
+    setSubmitting(true)
+
+    try {
+      const res = await fetch('/api/contact-event.php', {
+        method: 'POST',
+        body: fd,
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
+      /** @type {{ success?: boolean; error?: string }} */
+      let data = {}
+      try {
+        data = await res.json()
+      } catch {
+        data = {}
+      }
+
+      if (res.ok && data.success) {
+        const preservedEventUrl = eventUrl
+        showSuccess(SUCCESS_MSG)
+        form.reset()
+        if (preservedEventUrl && eventUrlInput instanceof HTMLInputElement) {
+          eventUrlInput.value = preservedEventUrl
+        } else {
+          prefillEventUrl()
+        }
+        resetTurnstile()
+        return
+      }
+
+      showError(
+        typeof data.error === 'string' && data.error
+          ? data.error
+          : ERROR_MSG,
+      )
+      resetTurnstile()
+    } catch {
+      showError(ERROR_MSG)
+      resetTurnstile()
+    } finally {
+      setSubmitting(false)
+    }
+  })
+</script>
+
+<style>
+  .contact-page {
+    padding-bottom: 64px;
+  }
+  .contact-inner {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px var(--px) 0;
+  }
+
+  .contact-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--c-muted);
+    margin-bottom: 28px;
+  }
+  .contact-breadcrumb a {
+    color: var(--c-primary);
+  }
+
+  .contact-header {
+    margin-bottom: 32px;
+  }
+  .contact-eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--c-primary);
+    margin-bottom: 10px;
+  }
+  .contact-title {
+    font-size: clamp(24px, 5vw, 34px);
+    font-weight: 800;
+    letter-spacing: -0.4px;
+    line-height: 1.25;
+    margin-bottom: 14px;
+  }
+  .contact-lead {
+    font-size: 15px;
+    color: var(--c-muted);
+    line-height: 1.8;
+  }
+
+  .contact-form {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    background: var(--c-white);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    padding: 28px 24px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .field label,
+  .field legend {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--c-text);
+  }
+  .field--topic {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  .req {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--c-primary);
+    margin-left: 4px;
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--c-muted);
+    line-height: 1.5;
+  }
+
+  .field input[type='text'],
+  .field input[type='email'],
+  .field input[type='url'],
+  .field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 15px;
+    padding: 12px 14px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    background: var(--c-bg);
+    color: var(--c-text);
+  }
+  .field input:focus,
+  .field textarea:focus {
+    outline: 2px solid color-mix(in srgb, var(--c-primary) 40%, transparent);
+    border-color: var(--c-primary);
+  }
+  .field textarea {
+    resize: vertical;
+    min-height: 140px;
+    line-height: 1.7;
+  }
+
+  .topic-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .topic-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 10px 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    background: var(--c-bg);
+    cursor: pointer;
+  }
+  .topic-option:has(input:checked) {
+    border-color: var(--c-primary);
+    background: #eff6ff;
+  }
+  .topic-option input {
+    margin-top: 2px;
+  }
+
+  .notice {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--c-muted);
+    background: #f0f9ff;
+    border-radius: var(--r-sm);
+    padding: 14px 16px;
+  }
+
+  .turnstile-wrap {
+    min-height: 65px;
+  }
+  .turnstile-missing {
+    font-size: 13px;
+    color: #b91c1c;
+    line-height: 1.6;
+  }
+
+  .submit-btn {
+    appearance: none;
+    border: 0;
+    background: var(--c-primary);
+    color: var(--c-white);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 14px 20px;
+    border-radius: var(--r-lg);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .submit-btn:hover:not(:disabled) {
+    background: var(--c-primary-dk);
+  }
+  .submit-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .form-error {
+    color: #b91c1c;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .form-success {
+    color: #047857;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .hidden {
+    display: none !important;
+  }
+
+  .hp {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+
+  .contact-back {
+    margin-top: 28px;
+    font-size: 14px;
+  }
+
+  @media (max-width: 480px) {
+    .contact-form {
+      padding: 22px 16px;
+    }
+  }
+</style>

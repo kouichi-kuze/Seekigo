@@ -20,6 +20,10 @@ import {
   inferIsFreeFromPriceText,
   resolveAreaSlug,
 } from '../src/lib/event-field-rules'
+import { normalizeHmToDb } from '../src/lib/event-time-rules'
+import {
+  defaultImageMetaForSource,
+} from '../src/lib/event-image-usage'
 import {
   formatDedupeLog,
   matchAgainstExisting,
@@ -35,6 +39,7 @@ import {
   buildIncomingPayload,
   upsertDedupeReview,
 } from './lib/dedupe-reviews'
+import { syncFieldReviewsForPublishedEvent } from './lib/field-reviews'
 
 config()
 
@@ -95,6 +100,9 @@ type EventRow = {
   category: string[]
   summary: string | null
   image_url: string | null
+  image_usage_status?: string | null
+  image_source?: string | null
+  image_credit?: string | null
   status: 'draft'
   last_checked_at: string
 }
@@ -247,8 +255,8 @@ function validateEvent(
       address,
       start_date,
       end_date: event.end_date ?? null,
-      start_time: event.start_time ?? null,
-      end_time: event.end_time ?? null,
+      start_time: normalizeHmToDb(event.start_time) ?? null,
+      end_time: normalizeHmToDb(event.end_time) ?? null,
       price_text: event.price_text ?? null,
       is_free,
       is_indoor: normalizeNullableBoolean(event.is_indoor),
@@ -257,6 +265,13 @@ function validateEvent(
       category,
       summary: event.summary ?? null,
       image_url: event.image_url ?? null,
+      ...(event.image_url
+        ? defaultImageMetaForSource('gotokyo')
+        : {
+            image_usage_status: 'unknown' as const,
+            image_source: null,
+            image_credit: null,
+          }),
       status: 'draft',
       last_checked_at: new Date().toISOString(),
     },
@@ -382,6 +397,19 @@ async function updateDraftBody(
   eventId: number,
   row: EventRow,
 ): Promise<boolean> {
+  // published は呼ばない。image_* のうち usage_status は URL 変更時のみ unknown へ戻す。
+  const { data: existing, error: selErr } = await client
+    .from('events')
+    .select('id, image_url')
+    .eq('id', eventId)
+    .eq('status', 'draft')
+    .maybeSingle()
+  if (selErr) throw selErr
+  if (!existing) return false
+
+  const imageChanged =
+    (existing.image_url ?? null) !== (row.image_url ?? null)
+
   const patch: Record<string, unknown> = {
     title: row.title,
     official_url: row.official_url,
@@ -404,6 +432,11 @@ async function updateDraftBody(
   }
   if (row.area) patch.area = row.area
   if (row.is_free !== null) patch.is_free = row.is_free
+  if (imageChanged) {
+    patch.image_usage_status = 'unknown'
+    patch.image_credit = null
+    if (row.image_url) patch.image_source = row.image_source ?? 'gotokyo'
+  }
 
   const { data, error } = await client
     .from('events')
@@ -598,6 +631,40 @@ async function main() {
           }
         } else if (match.matched_status === 'published') {
           summary.published_protected += 1
+        }
+
+        // published exact: フィールド差分レビュー（本体は変更しない）
+        if (match.matched_status === 'published') {
+          try {
+            await syncFieldReviewsForPublishedEvent(
+              writeClient ?? readClient,
+              {
+                eventId,
+                eventStatus: 'published',
+                sourceName: SOURCE_NAME,
+                sourceUrl: row.source_url,
+                proposed: {
+                  start_date: row.start_date,
+                  end_date: row.end_date,
+                  start_time: row.start_time,
+                  end_time: row.end_time,
+                  venue: row.venue,
+                  area: row.area,
+                  address: row.address,
+                  price_text: row.price_text,
+                  is_free: row.is_free,
+                  category: row.category,
+                  official_url: row.official_url,
+                },
+                write: Boolean(writeClient),
+              },
+            )
+          } catch (frErr) {
+            const message =
+              frErr instanceof Error ? frErr.message : String(frErr)
+            console.error(`${LOG} field-review failed: ${message}`)
+            // field review 失敗でも source attach は続行
+          }
         }
 
         const result = await ensureEventSource(

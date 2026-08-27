@@ -1,5 +1,6 @@
 ---
 import { formatAreaLabel, formatEventDateRange } from '../lib/display'
+import { resolvePublicImageUrl } from '../lib/event-image-usage'
 
 interface Props {
   event: {
@@ -7,6 +8,7 @@ interface Props {
     slug?: string | null
     title: string
     image_url?: string | null
+    image_usage_status?: string | null
     start_date?: string | null
     end_date?: string | null
     venue?: string | null
@@ -25,6 +27,7 @@ const hasAnyTag = event.is_free || event.is_kids || event.is_indoor || event.is_
 const dateLabel = formatEventDateRange(event.start_date, event.end_date)
 const areaLabel = formatAreaLabel(event.area)
 const detailUrl = event.slug ? `/tokyo/event/${event.slug}/` : null
+const publicImageUrl = resolvePublicImageUrl(event)
 
 // プレースホルダー用: タグ優先でアクセントカラーと背景を決定
 const placeholderConfig = (() => {
@@ -46,8 +49,8 @@ const placeholderConfig = (() => {
   data-night={event.is_night ? 'true' : 'false'}
 >
   <div class="card-image">
-    {event.image_url ? (
-      <img src={event.image_url} alt={event.title} loading="lazy" decoding="async" />
+    {publicImageUrl ? (
+      <img src={publicImageUrl} alt={event.title} loading="lazy" decoding="async" />
     ) : (
       <div
         class="card-placeholder"

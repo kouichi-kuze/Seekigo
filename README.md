@@ -41,6 +41,15 @@ All commands are run from the root of the project, from a terminal:
 | `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
 | `npm run astro -- --help` | Get help using the Astro CLI                     |
 
+## 主催者向けフォーム（Turnstile + Xserver PHP）
+
+`/contact/event-info/` からの問い合わせ送信は、Cloudflare Turnstile と Xserver 上の PHP（`/api/contact-event.php`）で処理します。
+
+- ビルド時: `.env` の `PUBLIC_TURNSTILE_SITE_KEY`（`.env.example` 参照）
+- 本番 Secret: `public_html` 外の `config/turnstile.php`（Git 非管理）
+
+詳細は [docs/contact-form-deploy.md](docs/contact-form-deploy.md) を参照してください。
+
 ## 👀 Want to learn more?
 
 Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).

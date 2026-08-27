@@ -26,6 +26,8 @@ import {
   inferIsFreeFromPriceText,
   resolveAreaSlug,
 } from '../src/lib/event-field-rules'
+import { normalizeHmToDb } from '../src/lib/event-time-rules'
+import { defaultImageMetaForSource } from '../src/lib/event-image-usage'
 import {
   ensureEventSource,
   extractEnjoytokyoEventId,
@@ -35,6 +37,7 @@ import {
   buildIncomingPayload,
   upsertDedupeReview,
 } from './lib/dedupe-reviews'
+import { syncFieldReviewsForPublishedEvent } from './lib/field-reviews'
 
 config()
 
@@ -213,6 +216,9 @@ type NewEventRow = {
   category: string[]
   summary: string | null
   image_url: string | null
+  image_usage_status?: string | null
+  image_source?: string | null
+  image_credit?: string | null
   status: 'draft'
   last_checked_at: string
 }
@@ -270,8 +276,8 @@ function validateNewDraft(
       address,
       start_date: detail.start_date,
       end_date: detail.end_date ?? null,
-      start_time: detail.start_time ?? null,
-      end_time: detail.end_time ?? null,
+      start_time: normalizeHmToDb(detail.start_time) ?? null,
+      end_time: normalizeHmToDb(detail.end_time) ?? null,
       price_text: detail.price_text ?? null,
       is_free,
       is_indoor: null,
@@ -280,6 +286,13 @@ function validateNewDraft(
       category: [],
       summary: summaryFromDescription(detail.description),
       image_url: detail.image_url ?? null,
+      ...(detail.image_url
+        ? defaultImageMetaForSource('enjoytokyo')
+        : {
+            image_usage_status: 'unknown' as const,
+            image_source: null,
+            image_credit: null,
+          }),
       status: 'draft',
       last_checked_at: now,
     },
@@ -329,6 +342,18 @@ async function updateDraftBody(
   eventId: number,
   row: NewEventRow,
 ): Promise<void> {
+  const { data: existing, error: selErr } = await supabase
+    .from('events')
+    .select('id, image_url')
+    .eq('id', eventId)
+    .eq('status', 'draft')
+    .maybeSingle()
+  if (selErr) throw selErr
+  if (!existing) return
+
+  const imageChanged =
+    (existing.image_url ?? null) !== (row.image_url ?? null)
+
   const patch: Record<string, unknown> = {
     title: row.title,
     official_url: row.official_url,
@@ -349,6 +374,11 @@ async function updateDraftBody(
   // deterministic で取れた場合のみ area / is_free を更新（null で AI 結果を消さない）
   if (row.area) patch.area = row.area
   if (row.is_free !== null) patch.is_free = row.is_free
+  if (imageChanged) {
+    patch.image_usage_status = 'unknown'
+    patch.image_credit = null
+    if (row.image_url) patch.image_source = row.image_source ?? 'enjoytokyo'
+  }
 
   const { error } = await supabase
     .from('events')
@@ -564,6 +594,51 @@ async function main() {
         console.log(
           `${LOG} existing event_id=${eventId} status=${existing.status} (published/draft body not overwritten)`,
         )
+
+        // published exact: フィールド差分レビュー（本体は変更しない）
+        if (existing.status === 'published') {
+          try {
+            const address =
+              cleanAddressAccess(detail.address) ??
+              (typeof detail.address === 'string'
+                ? detail.address.trim() || null
+                : null)
+            const area = resolveImportArea({
+              area: detail.area,
+              address,
+              venue: detail.venue,
+            })
+            const is_free = inferIsFreeFromPriceText(detail.price_text)
+
+            await syncFieldReviewsForPublishedEvent(
+              writeClient ?? readClient,
+              {
+                eventId,
+                eventStatus: 'published',
+                sourceName: SOURCE_NAME,
+                sourceUrl: detail.source_url ?? null,
+                proposed: {
+                  start_date: detail.start_date ?? null,
+                  end_date: detail.end_date ?? null,
+                  start_time: normalizeHmToDb(detail.start_time) ?? null,
+                  end_time: normalizeHmToDb(detail.end_time) ?? null,
+                  venue: detail.venue ?? null,
+                  area,
+                  address,
+                  price_text: detail.price_text ?? null,
+                  is_free,
+                  category: [],
+                  official_url: detail.official_url ?? null,
+                },
+                write: Boolean(writeClient),
+              },
+            )
+          } catch (frErr) {
+            const message =
+              frErr instanceof Error ? frErr.message : String(frErr)
+            console.error(`${LOG} field-review failed: ${message}`)
+          }
+        }
 
         const result = await ensureEventSource(
           writeClient ?? readClient,

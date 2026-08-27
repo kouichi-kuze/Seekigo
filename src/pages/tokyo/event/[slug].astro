@@ -2,6 +2,7 @@
 import Layout from '../../../layouts/Layout.astro'
 import { supabase } from '../../../lib/supabase'
 import { formatAreaLabel, formatEventDateRange } from '../../../lib/display'
+import { resolvePublicImageUrl } from '../../../lib/event-image-usage'
 
 export async function getStaticPaths() {
   const { data: events } = await supabase
@@ -26,6 +27,11 @@ const { data: event } = await supabase
 
 const dateLabel = formatEventDateRange(event?.start_date, event?.end_date)
 const areaLabel = formatAreaLabel(event?.area)
+const publicImageUrl = event ? resolvePublicImageUrl(event) : null
+const imageCredit =
+  publicImageUrl && event?.image_credit
+    ? String(event.image_credit).trim() || null
+    : null
 
 const timeLabel = (() => {
   if (!event) return null
@@ -80,14 +86,15 @@ const hasMeta = Boolean(
           <h1 class="event-title">{event.title}</h1>
         </header>
 
-        {event.image_url && (
+        {publicImageUrl && (
           <div class="event-image">
             <img
-              src={event.image_url}
+              src={publicImageUrl}
               alt={event.title}
               loading="eager"
               decoding="async"
             />
+            {imageCredit && <p class="event-image__credit">{imageCredit}</p>}
           </div>
         )}
 
@@ -164,6 +171,27 @@ const hasMeta = Boolean(
             </a>
           </p>
         )}
+
+        <section class="organizer-note" aria-labelledby="organizer-note-heading">
+          <h2 id="organizer-note-heading" class="organizer-note__heading">
+            イベント主催者・関係者の皆さまへ
+          </h2>
+          <p class="organizer-note__text">
+            Seekigoでは、公開情報をもとにイベント情報をご紹介しています。
+            掲載内容の確認、公式画像のご提供、情報の追加・変更、
+            今後のイベント掲載についてご希望がございましたら、
+            お気軽にご連絡ください。
+            ご提供いただいた情報は内容を確認のうえ、掲載に反映いたします。
+          </p>
+          <p class="organizer-note__cta">
+            <a
+              class="organizer-note__link"
+              href={`/contact/event-info/?event=${encodeURIComponent(`/tokyo/event/${event.slug}/`)}`}
+            >
+              掲載・情報提供について連絡する
+            </a>
+          </p>
+        </section>
 
         <p class="back-link">
           <a href="/tokyo/">← 東京のイベント一覧に戻る</a>
@@ -269,6 +297,13 @@ const hasMeta = Boolean(
     object-fit: cover;
     display: block;
   }
+  .event-image__credit {
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    color: var(--c-muted, #666);
+    background: #f7f7f7;
+  }
 
   /* Meta — 軽い区切り（強い表にしない） */
   .event-meta {
@@ -356,6 +391,43 @@ const hasMeta = Boolean(
   }
   .event-source a:hover {
     color: var(--c-primary);
+  }
+
+  /* 主催者・関係者向け案内 */
+  .organizer-note {
+    margin-top: 8px;
+    padding: 22px 20px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-white);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .organizer-note__heading {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--c-text);
+  }
+  .organizer-note__text {
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--c-muted);
+  }
+  .organizer-note__cta {
+    margin: 0;
+  }
+  .organizer-note__link {
+    display: inline-flex;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--c-primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .organizer-note__link:hover {
+    color: var(--c-primary-dk);
   }
 
   .back-link {
