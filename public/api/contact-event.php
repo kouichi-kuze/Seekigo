@@ -2,6 +2,9 @@
 /**
  * Seekigo 主催者向け問い合わせフォーム API（Xserver / PHP mail）
  * POST /api/contact-event.php
+ *
+ * 一時デバッグ: /home/kuzeya/seekigo.com/logs/contact-form.log
+ * （public_html 外。ディレクトリ未作成時は自動作成しない）
  */
 
 declare(strict_types=1);
@@ -20,6 +23,9 @@ const TURNSTILE_ACTION = 'contact_event';
 const MAIL_TO = 'contact@seekigo.com';
 const MAIL_FROM = 'contact@seekigo.com';
 const MAIL_SUBJECT = '[Seekigo] イベント掲載・情報提供のお問い合わせ';
+
+/** public_html 外の一時デバッグログ（個人情報・Secret は書かない） */
+const DEBUG_LOG_PATH = '/home/kuzeya/seekigo.com/logs/contact-form.log';
 
 /** @var array<string, string> */
 const TOPIC_LABELS = [
@@ -46,9 +52,12 @@ const ALLOWED_TURNSTILE_HOSTNAMES = [
     '127.0.0.1',
 ];
 
+debugLog('request_received');
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     jsonResponse(false, genericError(), 405);
 }
+debugLog('method_ok');
 
 $contentLength = isset($_SERVER['CONTENT_LENGTH']) ? (int) $_SERVER['CONTENT_LENGTH'] : 0;
 if ($contentLength > MAX_POST_BYTES) {
@@ -58,12 +67,14 @@ if ($contentLength > MAX_POST_BYTES) {
 if (!isAllowedRequestOrigin()) {
     jsonResponse(false, genericError(), 403);
 }
+debugLog('origin_ok');
 
-// honeypot — bot には成功風レスポンス
+// honeypot — bot には成功風レスポンス（詳細ログなし）
 $honeypot = sanitizeField(readPostString('company_website'), 200);
 if ($honeypot !== '') {
     jsonResponse(true);
 }
+debugLog('honeypot_passed');
 
 $name = sanitizeField(readPostString('name'), MAX_NAME);
 $organization = sanitizeField(readPostString('organization'), MAX_ORG);
@@ -88,9 +99,11 @@ if (!array_key_exists($topic, TOPIC_LABELS)) {
 if ($eventUrl !== '' && !isValidHttpUrl($eventUrl)) {
     jsonResponse(false, genericError(), 400);
 }
+debugLog('validation_ok');
 
 $secretKey = loadTurnstileSecretKey();
 if ($secretKey === null || $secretKey === '') {
+    debugLog('turnstile_failed');
     jsonResponse(false, genericError(), 500);
 }
 
@@ -119,11 +132,60 @@ $body = implode("\n", [
     '送信日時: ' . $sentAt,
 ]);
 
+debugLog('mail_attempt');
 if (!sendMail($emailRaw, $body)) {
+    debugLog('mail_failed');
     jsonResponse(false, genericError(), 500);
 }
 
+debugLog('mail_success');
 jsonResponse(true);
+
+/**
+ * 一時デバッグログ（イベント名のみ。Secret / PII 禁止）
+ * ログディレクトリが無い場合は自動作成せず、書き込みをスキップする。
+ */
+function debugLog(string $event): void
+{
+    // 許可されたイベント名のみ（誤って値を渡しても書かない）
+    static $allowed = [
+        'request_received' => true,
+        'method_ok' => true,
+        'origin_ok' => true,
+        'honeypot_passed' => true,
+        'validation_ok' => true,
+        'turnstile_request_sent' => true,
+        'turnstile_success' => true,
+        'turnstile_failed' => true,
+        'action_ok' => true,
+        'action_failed' => true,
+        'hostname_ok' => true,
+        'hostname_failed' => true,
+        'mail_attempt' => true,
+        'mail_success' => true,
+        'mail_failed' => true,
+    ];
+
+    if (!isset($allowed[$event])) {
+        return;
+    }
+
+    $logDir = dirname(DEBUG_LOG_PATH);
+    if (!is_dir($logDir)) {
+        return;
+    }
+    if (!is_writable($logDir) && !(file_exists(DEBUG_LOG_PATH) && is_writable(DEBUG_LOG_PATH))) {
+        return;
+    }
+
+    $line = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))
+        ->format('Y-m-d H:i:s T')
+        . ' '
+        . $event
+        . "\n";
+
+    @file_put_contents(DEBUG_LOG_PATH, $line, FILE_APPEND | LOCK_EX);
+}
 
 /**
  * @return never
@@ -239,6 +301,7 @@ function loadTurnstileSecretKey(): ?string
 function verifyTurnstile(string $secretKey, string $token): bool
 {
     if ($token === '') {
+        debugLog('turnstile_failed');
         return false;
     }
 
@@ -248,26 +311,41 @@ function verifyTurnstile(string $secretKey, string $token): bool
         'remoteip' => stripHeaderInjection($_SERVER['REMOTE_ADDR'] ?? ''),
     ]);
 
+    debugLog('turnstile_request_sent');
     $responseBody = postUrl(TURNSTILE_VERIFY_URL, $payload);
     if ($responseBody === null) {
+        debugLog('turnstile_failed');
         return false;
     }
 
     /** @var mixed $decoded */
     $decoded = json_decode($responseBody, true);
     if (!is_array($decoded) || empty($decoded['success'])) {
+        debugLog('turnstile_failed');
         return false;
     }
+    debugLog('turnstile_success');
 
-    if (isset($decoded['action']) && $decoded['action'] !== TURNSTILE_ACTION) {
-        return false;
+    if (isset($decoded['action'])) {
+        if ($decoded['action'] !== TURNSTILE_ACTION) {
+            debugLog('action_failed');
+            return false;
+        }
+        debugLog('action_ok');
+    } else {
+        // action 未返却時は厳格失敗にしない（hostname は別途）
+        debugLog('action_ok');
     }
 
     if (isset($decoded['hostname'])) {
         $hostname = strtolower((string) $decoded['hostname']);
         if (!in_array($hostname, ALLOWED_TURNSTILE_HOSTNAMES, true)) {
+            debugLog('hostname_failed');
             return false;
         }
+        debugLog('hostname_ok');
+    } else {
+        debugLog('hostname_ok');
     }
 
     return true;
@@ -333,13 +411,14 @@ function sendMail(string $replyEmail, string $body): bool
 
     $headerString = implode("\r\n", $headers);
 
+    // 日本語メールは mb_send_mail を優先（件名は mb 側にエンコードさせる）
+    if (function_exists('mb_send_mail')) {
+        return mb_send_mail(MAIL_TO, MAIL_SUBJECT, $body, $headerString, '-f' . MAIL_FROM);
+    }
+
     $subject = MAIL_SUBJECT;
     if (function_exists('mb_encode_mimeheader')) {
         $subject = mb_encode_mimeheader(MAIL_SUBJECT, 'UTF-8', 'B', "\r");
-    }
-
-    if (function_exists('mb_send_mail')) {
-        return mb_send_mail(MAIL_TO, $subject, $body, $headerString, '-f' . MAIL_FROM);
     }
 
     return mail(MAIL_TO, $subject, $body, $headerString, '-f' . MAIL_FROM);
