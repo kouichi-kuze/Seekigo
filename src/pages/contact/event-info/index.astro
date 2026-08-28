@@ -357,7 +357,6 @@ const allowedTopics = topics.map((t) => t.value)
     }
 
     fd.set('cf-turnstile-response', turnstileToken)
-    console.debug('[contact] turnstile token present:', Boolean(turnstileToken))
 
     setSubmitting(true)
 
