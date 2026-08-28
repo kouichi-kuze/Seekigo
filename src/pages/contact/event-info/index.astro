@@ -195,6 +195,7 @@ const allowedTopics = topics.map((t) => t.value)
 
   /** @type {number | null} */
   let turnstileWidgetId = null
+  let turnstileToken = ''
 
   /** ?event=/tokyo/event/xxx/ → 絶対URLに変換して初期値へ */
   function prefillEventUrl() {
@@ -250,14 +251,8 @@ const allowedTopics = topics.map((t) => t.value)
     }
   }
 
-  function getTurnstileToken() {
-    const input = form?.querySelector(
-      'input[name="cf-turnstile-response"]',
-    )
-    return input instanceof HTMLInputElement ? input.value.trim() : ''
-  }
-
   function resetTurnstile() {
+    turnstileToken = ''
     if (
       turnstileWidgetId !== null &&
       typeof turnstile !== 'undefined' &&
@@ -278,6 +273,15 @@ const allowedTopics = topics.map((t) => t.value)
       turnstileWidgetId = turnstile.render('#turnstile-widget', {
         sitekey: turnstileSiteKey,
         action: 'contact_event',
+        callback(token) {
+          turnstileToken = token
+        },
+        'expired-callback'() {
+          turnstileToken = ''
+        },
+        'error-callback'() {
+          turnstileToken = ''
+        },
       })
     }
 
@@ -347,13 +351,13 @@ const allowedTopics = topics.map((t) => t.value)
       return
     }
 
-    const turnstileToken = getTurnstileToken()
     if (!turnstileToken) {
       showError(ERROR_MSG)
       return
     }
 
     fd.set('cf-turnstile-response', turnstileToken)
+    console.debug('[contact] turnstile token present:', Boolean(turnstileToken))
 
     setSubmitting(true)
 
