@@ -18,7 +18,7 @@ export type Event = {
   is_kids: boolean | null
   is_indoor: boolean | null
   is_night: boolean | null
-  category?: string | string[] | null
+  category?: string[] | null
   official_url: string | null
   status?: string
   [key: string]: unknown

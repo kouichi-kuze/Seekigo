@@ -87,3 +87,33 @@ export function formatEventDateRange(
   const sameYear = start.year === end.year
   return `${formatJaDay(start, true)}〜${formatJaDay(end, !sameYear)}`
 }
+
+/** Asia/Tokyo の今日（YYYY-MM-DD） */
+export function tokyoTodayYmd(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+}
+
+/**
+ * 開催終了判定（Asia/Tokyo）。
+ * - end_date あり: end_date < 今日
+ * - end_date なし: start_date < 今日（単日扱い）
+ * - start_date / end_date が null・空・解析不能の場合は false（誤判定しない）
+ */
+export function isEventEnded(
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+  today: string = tokyoTodayYmd(),
+): boolean {
+  if (!startDate?.trim()) return false
+  if (!parseYmd(today)) return false
+
+  const endRaw = endDate?.trim()
+  if (endRaw) {
+    if (!parseYmd(endRaw)) return false
+    return endRaw < today
+  }
+
+  const startRaw = startDate.trim()
+  if (!parseYmd(startRaw)) return false
+  return startRaw < today
+}

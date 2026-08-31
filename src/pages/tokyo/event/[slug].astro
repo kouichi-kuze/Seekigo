@@ -1,8 +1,8 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
 import { supabase } from '../../../lib/supabase'
-import { formatAreaLabel, formatEventDateRange } from '../../../lib/display'
-import { resolvePublicImageUrl } from '../../../lib/event-image-usage'
+import { formatAreaLabel, formatEventDateRange, isEventEnded } from '../../../lib/display'
+import { resolveEventDisplayImage } from '../../../lib/event-image-usage'
 
 export async function getStaticPaths() {
   const { data: events } = await supabase
@@ -27,11 +27,12 @@ const { data: event } = await supabase
 
 const dateLabel = formatEventDateRange(event?.start_date, event?.end_date)
 const areaLabel = formatAreaLabel(event?.area)
-const publicImageUrl = event ? resolvePublicImageUrl(event) : null
+const displayImage = event ? resolveEventDisplayImage(event) : null
 const imageCredit =
-  publicImageUrl && event?.image_credit
+  displayImage?.kind === 'external' && event?.image_credit
     ? String(event.image_credit).trim() || null
     : null
+const isEnded = event ? isEventEnded(event.start_date, event.end_date) : false
 
 const timeLabel = (() => {
   if (!event) return null
@@ -86,14 +87,23 @@ const hasMeta = Boolean(
           <h1 class="event-title">{event.title}</h1>
         </header>
 
-        {publicImageUrl && (
+        {displayImage && (
           <div class="event-image">
             <img
-              src={publicImageUrl}
+              src={displayImage.src}
               alt={event.title}
               loading="eager"
               decoding="async"
+              class:list={[
+                displayImage.kind !== 'external' && 'event-image__img--fallback',
+                isEnded && 'event-image__img--ended',
+              ]}
             />
+            {isEnded && (
+              <div class="event-image__ended" aria-hidden="true">
+                <span class="event-image__ended-label">開催終了</span>
+              </div>
+            )}
             {imageCredit && <p class="event-image__credit">{imageCredit}</p>}
           </div>
         )}
@@ -284,18 +294,45 @@ const hasMeta = Boolean(
     overflow-wrap: anywhere;
   }
 
-  /* Image — ある場合のみ */
+  /* Image */
   .event-image {
     border-radius: var(--r-md);
     overflow: hidden;
     aspect-ratio: 16 / 9;
     background: var(--c-border);
+    position: relative;
   }
   .event-image img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  .event-image__img--fallback {
+    background: var(--c-border);
+  }
+  .event-image__img--ended {
+    filter: grayscale(0.35) brightness(0.85);
+  }
+  .event-image__ended {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(17, 24, 39, 0.42);
+    pointer-events: none;
+  }
+  .event-image__ended-label {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: #fff;
+    padding: 10px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: var(--r-sm);
+    background: rgba(17, 24, 39, 0.55);
+    backdrop-filter: blur(2px);
   }
   .event-image__credit {
     margin: 0;
