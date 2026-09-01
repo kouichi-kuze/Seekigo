@@ -4,7 +4,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-export type EventSourceName = 'gotokyo' | 'enjoytokyo'
+export type EventSourceName = 'gotokyo' | 'enjoytokyo' | 'walkerplus'
 
 export type EventSourceRow = {
   event_id: number
@@ -85,4 +85,21 @@ export function extractEnjoytokyoEventId(
   if (!sourceUrl) return null
   const m = sourceUrl.match(/\/event\/(\d+)\/?/i)
   return m?.[1] ?? null
+}
+
+/**
+ * Walkerplus /event/ar0313e593530/ → 593530（e 以降の数字部分）
+ * URL 不正時は null
+ */
+export function extractWalkerplusEventId(
+  sourceUrl: string | null | undefined,
+): string | null {
+  if (!sourceUrl) return null
+  const m = sourceUrl.match(/\/event\/ar\d+e(\d+)\/?(?:[?#]|$)/i)
+  if (m?.[1]) return m[1]
+  // フォールバック: フル ID（ar0313e593530）から末尾数字
+  const full = sourceUrl.match(/\/event\/(ar\d+e\d+)\/?/i)
+  if (!full?.[1]) return null
+  const tail = full[1].match(/e(\d+)$/i)
+  return tail?.[1] ?? null
 }

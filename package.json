@@ -20,7 +20,8 @@
     "fetch:enjoytokyo": "tsx scripts/fetch-enjoytokyo.ts",
     "fetch:enjoytokyo:details": "tsx scripts/fetch-enjoytokyo-details.ts",
     "dedupe:enjoytokyo": "tsx scripts/check-event-duplicates.ts",
-    "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts"
+    "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts",
+    "import:walkerplus": "tsx scripts/import-walkerplus-supabase.ts"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",

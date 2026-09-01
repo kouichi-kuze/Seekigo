@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.event_sources (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT event_sources_source_name_check
-    CHECK (source_name IN ('gotokyo', 'enjoytokyo')),
+    CHECK (source_name IN ('gotokyo', 'enjoytokyo', 'walkerplus')),
   CONSTRAINT event_sources_event_source_url_unique
     UNIQUE (event_id, source_name, source_url)
 );
@@ -35,7 +35,7 @@ COMMENT ON TABLE public.event_sources IS
   'Multiple source links per event (gotokyo, enjoytokyo, ...). Writes via service_role only.';
 
 COMMENT ON COLUMN public.event_sources.source_name IS
-  'Source key: gotokyo | enjoytokyo';
+  'Source key: gotokyo | enjoytokyo | walkerplus';
 
 COMMENT ON COLUMN public.event_sources.source_event_id IS
   'Provider-side id when available (e.g. EnjoyTokyo /event/2074515/ → 2074515)';

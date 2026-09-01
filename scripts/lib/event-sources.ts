@@ -3,6 +3,7 @@ export {
   ensureEventSource,
   extractEnjoytokyoEventId,
   extractGotokyoSpotId,
+  extractWalkerplusEventId,
   type AttachResult,
   type EventSourceName,
   type EventSourceRow,

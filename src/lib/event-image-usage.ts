@@ -37,6 +37,7 @@ export const DISPLAYABLE_IMAGE_USAGE_STATUSES = [
 export type ImageSourceName =
   | 'gotokyo'
   | 'enjoytokyo'
+  | 'walkerplus'
   | 'organizer'
   | 'seekigo'
   | 'other'

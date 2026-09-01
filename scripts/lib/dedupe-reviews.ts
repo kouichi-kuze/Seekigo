@@ -11,6 +11,7 @@ import type { EventSourceName } from '../../src/lib/event-sources'
 import {
   extractEnjoytokyoEventId,
   extractGotokyoSpotId,
+  extractWalkerplusEventId,
 } from '../../src/lib/event-sources'
 
 export type DedupeReviewDuplicateStatus = 'likely' | 'ambiguous'
@@ -39,6 +40,7 @@ export type IncomingReviewPayload = {
   category: string[] | null
   summary: string | null
   image_url: string | null
+  walkerplus_categories_raw?: string[] | null
 }
 
 export type UpsertDedupeReviewInput = {
@@ -91,14 +93,18 @@ export function buildIncomingPayload(opts: {
   category?: string[] | null
   summary?: string | null
   image_url?: string | null
+  /** Walkerplus 取得元カテゴリ（source metadata） */
+  walkerplus_categories_raw?: string[] | null
 }): IncomingReviewPayload {
   const sourceUrl = opts.source_url ?? null
   const sourceEventId =
     opts.sourceName === 'gotokyo'
       ? extractGotokyoSpotId(sourceUrl)
-      : extractEnjoytokyoEventId(sourceUrl)
+      : opts.sourceName === 'walkerplus'
+        ? extractWalkerplusEventId(sourceUrl)
+        : extractEnjoytokyoEventId(sourceUrl)
 
-  return {
+  const payload: IncomingReviewPayload = {
     title: opts.title ?? null,
     start_date: opts.start_date ?? null,
     end_date: opts.end_date ?? null,
@@ -116,6 +122,15 @@ export function buildIncomingPayload(opts: {
     summary: opts.summary ?? null,
     image_url: opts.image_url ?? null,
   }
+
+  if (
+    opts.sourceName === 'walkerplus' &&
+    Array.isArray(opts.walkerplus_categories_raw)
+  ) {
+    payload.walkerplus_categories_raw = opts.walkerplus_categories_raw
+  }
+
+  return payload
 }
 
 async function findExistingReview(

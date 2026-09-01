@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS public.event_dedupe_reviews (
     CHECK (status IN ('pending', 'linked', 'created', 'rejected', 'expired')),
 
   incoming_source_name text NOT NULL
-    CHECK (incoming_source_name IN ('gotokyo', 'enjoytokyo')),
+    CHECK (incoming_source_name IN ('gotokyo', 'enjoytokyo', 'walkerplus')),
   incoming_source_url text NOT NULL,
 
   incoming_payload jsonb NOT NULL,

@@ -19,6 +19,7 @@ import {
   ensureEventSource,
   extractEnjoytokyoEventId,
   extractGotokyoSpotId,
+  extractWalkerplusEventId,
   type EventSourceName,
 } from './event-sources'
 
@@ -59,8 +60,15 @@ type ReviewRow = {
   duplicate_status: string
 }
 
-function isValidYmd(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+function resolveSourceEventId(
+  sourceName: EventSourceName,
+  sourceUrl: string,
+  payloadId?: string | null,
+): string | null {
+  if (payloadId) return payloadId
+  if (sourceName === 'gotokyo') return extractGotokyoSpotId(sourceUrl)
+  if (sourceName === 'walkerplus') return extractWalkerplusEventId(sourceUrl)
+  return extractEnjoytokyoEventId(sourceUrl)
 }
 
 function generateDraftSlug(
@@ -78,6 +86,10 @@ function generateDraftSlug(
   if (sourceName === 'enjoytokyo') {
     const eid = extractEnjoytokyoEventId(sourceUrl)
     if (eid) return `enjoytokyo-${eid}-${year}`
+  }
+  if (sourceName === 'walkerplus') {
+    const wid = extractWalkerplusEventId(sourceUrl)
+    if (wid) return `walkerplus-${wid}-${year}`
   }
 
   const normalized = title.normalize('NFKC').trim().toLowerCase()
@@ -165,11 +177,11 @@ async function linkExisting(
     (payload.source_url || review.incoming_source_url || '').trim()
   if (!sourceUrl) throw new Error('incoming source_url is missing')
 
-  const sourceEventId =
-    payload.source_event_id ??
-    (sourceName === 'gotokyo'
-      ? extractGotokyoSpotId(sourceUrl)
-      : extractEnjoytokyoEventId(sourceUrl))
+  const sourceEventId = resolveSourceEventId(
+    sourceName,
+    sourceUrl,
+    payload.source_event_id,
+  )
 
   // events 本体は触らない（published / draft 問わず）
   await ensureEventSource(
@@ -299,11 +311,11 @@ async function createNewDraft(
   if (!inserted?.id) throw new Error('insert returned no id')
 
   const eventId = Number(inserted.id)
-  const sourceEventId =
-    payload.source_event_id ??
-    (sourceName === 'gotokyo'
-      ? extractGotokyoSpotId(sourceUrl)
-      : extractEnjoytokyoEventId(sourceUrl))
+  const sourceEventId = resolveSourceEventId(
+    sourceName,
+    sourceUrl,
+    payload.source_event_id,
+  )
 
   await ensureEventSource(
     admin,
