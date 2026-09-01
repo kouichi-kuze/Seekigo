@@ -1,0 +1,15 @@
+-- events.status に hidden を追加する migration 案
+-- Supabase SQL Editor で手動実行。アプリ側は isPublicStatus / isBodyProtectedFromSync を参照。
+--
+-- 1) 既存 CHECK 制約名を確認:
+--    SELECT conname, pg_get_constraintdef(oid)
+--    FROM pg_constraint
+--    WHERE conrelid = 'public.events'::regclass AND contype = 'c';
+--
+-- 2) 例: 制約名が events_status_check の場合
+-- ALTER TABLE public.events DROP CONSTRAINT IF EXISTS events_status_check;
+-- ALTER TABLE public.events ADD CONSTRAINT events_status_check
+--   CHECK (status IN ('draft', 'published', 'hidden'));
+--
+-- 3) 既存データ確認:
+-- SELECT status, COUNT(*) FROM public.events GROUP BY status ORDER BY status;

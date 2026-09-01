@@ -7,6 +7,9 @@ import {
 import { processAdminDedupeReviewPost } from './admin-dedupe-review'
 import { processAdminImageUsagePost } from './admin-image-usage'
 import { processAdminFieldReviewPost } from './admin-field-review'
+import { processAdminEventEditPost } from './admin-event-edit'
+import { processAdminHidePost } from './admin-hide'
+import { processAdminDeletePost } from './admin-delete'
 
 type AdminCookies = {
   get: (name: string) => { value: string } | undefined
@@ -46,6 +49,18 @@ export async function processAdminPublishPost(opts: {
     return processAdminFieldReviewPost({ request, url, cookies, form })
   }
 
+  if (intent === 'event_update') {
+    return processAdminEventEditPost({ request, url, cookies, form })
+  }
+
+  if (intent === 'hide_event' || intent === 'unhide_event') {
+    return processAdminHidePost({ request, url, cookies, form })
+  }
+
+  if (intent === 'delete_event') {
+    return processAdminDeletePost({ request, url, cookies, form })
+  }
+
   const csrfCheck = verifyAdminCsrf({
     formToken: String(form.get('csrf_token') ?? ''),
     cookieToken: cookies.get('seekigo_admin_csrf')?.value,
@@ -63,6 +78,9 @@ export async function processAdminPublishPost(opts: {
     const ids = parsePositiveIntIds(
       [form.get('event_id')].filter(Boolean) as FormDataEntryValue[],
     )
+    if (import.meta.env.DEV) {
+      console.log('[admin-publish] intent=publish event_ids=', ids)
+    }
     if (ids.length !== 1) {
       return { ok: false, message: 'Invalid event id' }
     }
@@ -85,7 +103,7 @@ export async function processAdminPublishPost(opts: {
       }
     }
 
-    const { error: updateError } = await admin
+    const { data: updated, error: updateError } = await admin
       .from('events')
       .update({
         status: 'published',
@@ -93,17 +111,33 @@ export async function processAdminPublishPost(opts: {
       })
       .eq('id', eventId)
       .eq('status', 'draft')
+      .select('id')
+
+    if (import.meta.env.DEV) {
+      console.log('[admin-publish] publish update rows=', updated?.length ?? 0, {
+        error: updateError?.message ?? null,
+      })
+    }
 
     if (updateError) throw updateError
+    if (!updated?.length) {
+      return {
+        ok: false,
+        message: `Publish failed: no rows updated (event_id=${eventId})`,
+      }
+    }
 
     return {
       ok: true,
-      redirectTo: `/admin/events/?published=1&title=${encodeURIComponent(String(existing.title ?? eventId))}`,
+      redirectTo: `/admin/events/draft/?published=1&title=${encodeURIComponent(String(existing.title ?? eventId))}`,
     }
   }
 
   if (intent === 'publish_selected') {
     const ids = parsePositiveIntIds(form.getAll('event_ids'))
+    if (import.meta.env.DEV) {
+      console.log('[admin-publish] intent=publish_selected event_ids=', ids)
+    }
     if (ids.length === 0) {
       return { ok: false, message: 'イベントが選択されていません' }
     }
@@ -119,10 +153,18 @@ export async function processAdminPublishPost(opts: {
       .eq('status', 'draft')
       .select('id')
 
-    if (updateError) throw updateError
+    if (updateError) {
+      if (import.meta.env.DEV) {
+        console.log('[admin-publish] publish_selected error=', updateError.message)
+      }
+      throw updateError
+    }
 
     const count = updated?.length ?? 0
-    return { ok: true, redirectTo: `/admin/events/?bulk=${count}` }
+    if (import.meta.env.DEV) {
+      console.log('[admin-publish] publish_selected updated rows=', count)
+    }
+    return { ok: true, redirectTo: `/admin/events/draft/?bulk=${count}` }
   }
 
   return { ok: false, message: 'Invalid publish request' }

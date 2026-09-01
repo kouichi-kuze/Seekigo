@@ -1,0 +1,104 @@
+---
+import { ADMIN_NAV, isAdminNavActive } from '../../lib/admin/nav'
+
+interface Props {
+  pathname: string
+}
+
+const { pathname } = Astro.props
+---
+
+<aside class="admin-sidebar" aria-label="Admin navigation">
+  <div class="admin-sidebar__brand">
+    <a href="/admin/events/">Seekigo Admin</a>
+  </div>
+  <nav class="admin-sidebar__nav">
+    {
+      ADMIN_NAV.map((section) => (
+        <div class="admin-sidebar__section">
+          {section.title && (
+            <p class="admin-sidebar__section-title">{section.title}</p>
+          )}
+          <ul class="admin-sidebar__list">
+            {section.items.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  class:list={[
+                    'admin-sidebar__link',
+                    isAdminNavActive(pathname, item) && 'admin-sidebar__link--active',
+                  ]}
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </nav>
+</aside>
+
+<style>
+  .admin-sidebar {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 1rem 0;
+    min-height: 100vh;
+  }
+
+  .admin-sidebar__brand {
+    padding: 0 1rem 1rem;
+    font-weight: 800;
+    font-size: 1.05rem;
+    border-bottom: 1px solid #334155;
+    margin-bottom: 0.75rem;
+  }
+
+  .admin-sidebar__brand a {
+    color: #f8fafc;
+    text-decoration: none;
+  }
+
+  .admin-sidebar__section {
+    margin-bottom: 0.75rem;
+  }
+
+  .admin-sidebar__section-title {
+    margin: 0;
+    padding: 0.35rem 1rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+  }
+
+  .admin-sidebar__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .admin-sidebar__link {
+    display: block;
+    padding: 0.45rem 1rem;
+    color: #cbd5e1;
+    text-decoration: none;
+    font-size: 0.92rem;
+    border-left: 3px solid transparent;
+  }
+
+  .admin-sidebar__link:hover {
+    background: #334155;
+    color: #fff;
+  }
+
+  .admin-sidebar__link--active {
+    background: #0f172a;
+    color: #fff;
+    border-left-color: #38bdf8;
+    font-weight: 600;
+  }
+</style>

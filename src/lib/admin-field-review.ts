@@ -112,7 +112,7 @@ export async function processAdminFieldReviewPost(opts: {
 
     return {
       ok: true,
-      redirectTo: `/admin/events/?field=rejected&review_id=${reviewId}&event_id=${eventId}`,
+      redirectTo: `/admin/events/reviews/field/?field=rejected&review_id=${reviewId}&event_id=${eventId}`,
     }
   }
 
@@ -164,6 +164,6 @@ export async function processAdminFieldReviewPost(opts: {
 
   return {
     ok: true,
-    redirectTo: `/admin/events/?field=accepted&review_id=${reviewId}&event_id=${eventId}&fname=${encodeURIComponent(field)}`,
+    redirectTo: `/admin/events/reviews/field/?field=accepted&review_id=${reviewId}&event_id=${eventId}&fname=${encodeURIComponent(field)}`,
   }
 }

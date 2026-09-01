@@ -9,7 +9,10 @@ function seekigoAdminPublishDev() {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = req.url?.split('?')[0] ?? '';
-        if (req.method !== 'POST' || path !== '/admin/events/') {
+        const isAdminEventsPost =
+          req.method === 'POST' &&
+          (path === '/admin/events/' || path === '/admin/events/draft/');
+        if (!isAdminEventsPost) {
           return next();
         }
 
@@ -21,6 +24,14 @@ function seekigoAdminPublishDev() {
         req.on('end', () => {
           void (async () => {
             const body = Buffer.concat(chunks).toString('utf8');
+            if (process.env.NODE_ENV !== 'production') {
+              const params = new URLSearchParams(body);
+              console.log('[admin-dev] POST', path, {
+                intent: params.get('intent'),
+                event_id: params.get('event_id'),
+                event_ids: params.getAll('event_ids'),
+              });
+            }
             try {
               const host = req.headers.host ?? 'localhost:4321';
               const origin = `http://${host}`;
@@ -56,7 +67,7 @@ function seekigoAdminPublishDev() {
               res.statusCode = 302;
               res.setHeader(
                 'Location',
-                `/admin/events/?error=${encodeURIComponent(message)}`,
+                `/admin/events/draft/?error=${encodeURIComponent(message)}`,
               );
               res.end();
             }

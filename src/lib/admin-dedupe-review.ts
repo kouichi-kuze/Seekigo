@@ -386,7 +386,7 @@ export async function processAdminDedupeReviewPost(opts: {
     const eventId = await linkExisting(admin, review)
     return {
       ok: true,
-      redirectTo: `/admin/events/?review=linked&event_id=${eventId}`,
+      redirectTo: `/admin/events/draft/?review=linked&event_id=${eventId}`,
     }
   }
 
@@ -394,7 +394,7 @@ export async function processAdminDedupeReviewPost(opts: {
     const eventId = await createNewDraft(admin, review)
     return {
       ok: true,
-      redirectTo: `/admin/events/?review=created&event_id=${eventId}`,
+      redirectTo: `/admin/events/draft/?review=created&event_id=${eventId}`,
     }
   }
 
@@ -402,7 +402,7 @@ export async function processAdminDedupeReviewPost(opts: {
     await rejectReview(admin, review)
     return {
       ok: true,
-      redirectTo: `/admin/events/?review=rejected&review_id=${reviewId}`,
+      redirectTo: `/admin/events/draft/?review=rejected&review_id=${reviewId}`,
     }
   }
 

@@ -1,0 +1,311 @@
+---
+import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
+import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
+import { ADMIN_EVENT_SELECT, type AdminEvent } from '../../../../lib/admin/types'
+import { IMAGE_USAGE_STATUSES } from '../../../../lib/event-image-usage'
+import { isBodyProtectedFromSync } from '../../../../lib/event-status'
+import { getAdminEventEditStaticPaths } from '../../../../lib/admin/event-edit-paths'
+
+/** 本番 SSG では admin 編集ページを生成しない。DEV では Supabase から id 一覧を取得。 */
+export async function getStaticPaths() {
+  return getAdminEventEditStaticPaths()
+}
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const { id: idParam } = Astro.params
+const eventId = Number(idParam)
+if (!Number.isFinite(eventId) || eventId <= 0) {
+  return adminDevNotFoundResponse()
+}
+
+const { createAdminClient } = await import('../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+let event: AdminEvent | null = null
+let loadError: string | null = null
+let message: string | null = null
+let errorMessage: string | null = Astro.url.searchParams.get('error')
+
+if (Astro.url.searchParams.get('saved') === '1') {
+  message = '保存しました'
+} else if (Astro.url.searchParams.get('hidden') === '1') {
+  message = '非表示（hidden）にしました'
+} else if (Astro.url.searchParams.get('unhidden') === '1') {
+  message = '再公開（published）しました'
+}
+
+try {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('events')
+    .select(ADMIN_EVENT_SELECT)
+    .eq('id', eventId)
+    .maybeSingle()
+  if (error) throw error
+  event = (data as AdminEvent | null) ?? null
+  if (!event) loadError = `Event id=${eventId} not found`
+} catch (e) {
+  loadError = e instanceof Error ? e.message : String(e)
+}
+
+function fmtTime(t: string | null | undefined): string {
+  if (!t) return ''
+  const m = t.match(/^(\d{2}:\d{2})/)
+  return m ? m[1] : t
+}
+
+function fmtCategory(c: string[] | null | undefined): string {
+  if (!c?.length) return ''
+  return c.join(', ')
+}
+
+function usageStatusOf(ev: AdminEvent): string {
+  return ev.image_usage_status?.trim() || 'unknown'
+}
+
+const syncProtected = event ? isBodyProtectedFromSync(event.status) : false
+const isDraft = event?.status === 'draft'
+const isPublished = event?.status === 'published'
+const isHidden = event?.status === 'hidden'
+---
+
+<AdminLayout title={event ? `Edit #${event.id}` : 'Edit Event'} csrfToken={csrfToken}>
+  <p><a href="/admin/events/all/">← All Events</a></p>
+  <h1>Event #{eventId}</h1>
+
+  {message && <p class="ok">{message}</p>}
+  {errorMessage && <p class="err">{decodeURIComponent(errorMessage)}</p>}
+  {loadError && <p class="err">{loadError}</p>}
+
+  {
+    event && (
+      <>
+        <div class="admin-panel">
+          <p>
+            status: <strong>{event.status}</strong>
+            {event.slug && isPublished && (
+              <>
+                {' · '}
+                <a href={`/tokyo/event/${event.slug}/`} target="_blank" rel="noopener">
+                  公開ページ ↗
+                </a>
+              </>
+            )}
+          </p>
+          {isDraft && (
+            <p class="sync-warn">
+              draft は次回 sync でソース値に上書きされる可能性があります。published
+              / hidden は sync 本体非上書き（field review 経路は別）。
+            </p>
+          )}
+          {syncProtected && (
+            <p class="hint">
+              published / hidden — sync import は本体を上書きしません。
+            </p>
+          )}
+        </div>
+
+        <form
+          class="admin-panel edit-form"
+          method="post"
+          action="/admin/events/"
+        >
+          <input type="hidden" name="csrf_token" value={csrfToken} />
+          <input type="hidden" name="intent" value="event_update" />
+          <input type="hidden" name="event_id" value={String(event.id)} />
+
+          <h2>基本情報</h2>
+          <label>
+            title
+            <input type="text" name="title" value={event.title ?? ''} required />
+          </label>
+          <div class="form-row">
+            <label>
+              start_date
+              <input type="date" name="start_date" value={event.start_date?.slice(0, 10) ?? ''} />
+            </label>
+            <label>
+              end_date
+              <input type="date" name="end_date" value={event.end_date?.slice(0, 10) ?? ''} />
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              start_time (HH:MM)
+              <input type="text" name="start_time" value={fmtTime(event.start_time)} placeholder="10:00" />
+            </label>
+            <label>
+              end_time (HH:MM)
+              <input type="text" name="end_time" value={fmtTime(event.end_time)} placeholder="17:00" />
+            </label>
+          </div>
+          <label>
+            venue
+            <input type="text" name="venue" value={event.venue ?? ''} />
+          </label>
+          <label>
+            area
+            <input type="text" name="area" value={event.area ?? ''} />
+          </label>
+          <label>
+            address
+            <textarea name="address" rows="2">{event.address ?? ''}</textarea>
+          </label>
+          <label>
+            price_text
+            <input type="text" name="price_text" value={event.price_text ?? ''} />
+          </label>
+          <label>
+            category（カンマ区切り）
+            <input type="text" name="category" value={fmtCategory(event.category)} />
+          </label>
+          <label>
+            official_url
+            <input type="url" name="official_url" value={event.official_url ?? ''} />
+          </label>
+          <label>
+            summary
+            <textarea name="summary" rows="5">{event.summary ?? ''}</textarea>
+          </label>
+
+          <h2>画像</h2>
+          <label>
+            image_url
+            <input type="url" name="image_url" value={event.image_url ?? ''} />
+          </label>
+          <label>
+            image_usage_status
+            <select name="image_usage_status">
+              {IMAGE_USAGE_STATUSES.map((s) => (
+                <option value={s} selected={usageStatusOf(event) === s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            image_credit（licensed / organizer_granted 時）
+            <input type="text" name="image_credit" value={event.image_credit ?? ''} />
+          </label>
+          <input type="hidden" name="image_source" value={event.image_source ?? 'seekigo'} />
+
+          <button type="submit">保存</button>
+        </form>
+
+        <div class="admin-panel">
+          <h2>Visibility</h2>
+          {isPublished && (
+            <form method="post" action="/admin/events/" class="inline-form">
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <input type="hidden" name="intent" value="hide_event" />
+              <input type="hidden" name="event_id" value={String(event.id)} />
+              <button type="submit">公開サイトから非表示（hidden）</button>
+            </form>
+          )}
+          {isHidden && (
+            <form method="post" action="/admin/events/" class="inline-form">
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <input type="hidden" name="intent" value="unhide_event" />
+              <input type="hidden" name="event_id" value={String(event.id)} />
+              <button type="submit">再公開（published）</button>
+            </form>
+          )}
+          {isDraft && (
+            <p class="hint">
+              draft の公開は <a href="/admin/events/draft/">Draft workspace</a> から
+              Publish してください。
+            </p>
+          )}
+        </div>
+
+        <div class="admin-panel danger-zone">
+          <h2>Danger Zone</h2>
+          <p class="err">
+            物理削除します。event_sources / field_reviews は CASCADE、dedupe reviews
+            は SET NULL されます。
+          </p>
+          <form
+            method="post"
+            action="/admin/events/"
+            id="delete-form"
+            onsubmit="return confirm('本当に削除しますか？この操作は取り消せません。');"
+          >
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="delete_event" />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+            <label>
+              確認のため event id を入力: <strong>{event.id}</strong>
+              <input
+                type="text"
+                name="confirm_delete"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder={String(event.id)}
+                required
+              />
+            </label>
+            <button type="submit" class="btn-danger">イベントを削除</button>
+          </form>
+        </div>
+      </>
+    )
+  }
+</AdminLayout>
+
+<style>
+  .edit-form label {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .edit-form input[type='text'],
+  .edit-form input[type='url'],
+  .edit-form input[type='date'],
+  .edit-form select,
+  .edit-form textarea {
+    display: block;
+    width: 100%;
+    max-width: 36rem;
+    margin-top: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    font-weight: 400;
+  }
+
+  .form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .sync-warn {
+    background: #fff8e6;
+    border: 1px solid #e6c200;
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 0 0;
+  }
+
+  .danger-zone {
+    border-color: #e88;
+    background: #fff5f5;
+  }
+
+  .btn-danger {
+    background: #a40000;
+    color: #fff;
+    border: none;
+    padding: 0.5rem 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 0.5rem;
+  }
+
+  .inline-form button {
+    margin-top: 0;
+  }
+</style>

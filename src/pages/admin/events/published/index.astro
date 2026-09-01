@@ -1,0 +1,33 @@
+---
+import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import EventListTable from '../../../../components/admin/EventListTable.astro'
+import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
+import { fetchAdminEventList } from '../../../../lib/admin/queries'
+import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const { createAdminClient } = await import('../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+let events: import('../../../../lib/admin/types').AdminEvent[] = []
+let loadError: string | null = null
+
+try {
+  events = await fetchAdminEventList(createAdminClient(), {
+    kind: 'status',
+    status: 'published',
+  })
+} catch (e) {
+  loadError = e instanceof Error ? e.message : String(e)
+}
+---
+
+<AdminLayout title="Published Events" csrfToken={csrfToken}>
+  <h1>Published</h1>
+  <p class="hint">公開サイトに載るイベント（status = published）。</p>
+  {loadError && <p class="err">{loadError}</p>}
+  <EventListTable events={events} showStatus={false} />
+</AdminLayout>

@@ -1,0 +1,144 @@
+---
+import AdminLayout from '../../../../../layouts/AdminLayout.astro'
+import { adminDevNotFoundResponse } from '../../../../../lib/admin/dev-guard'
+import { getOrCreateAdminCsrfToken } from '../../../../../lib/admin-security'
+import {
+  IMAGE_USAGE_STATUSES,
+  resolveEventDisplayImage,
+} from '../../../../../lib/event-image-usage'
+import type { AdminEvent } from '../../../../../lib/admin/types'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const { createAdminClient } = await import('../../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+const EVENT_SELECT =
+  'id, title, slug, category, image_url, image_usage_status, image_source, image_credit, status'
+
+let events: AdminEvent[] = []
+let loadError: string | null = null
+let message: string | null = null
+
+const sp = Astro.url.searchParams
+if (sp.get('image') === 'updated') {
+  message = `更新しました (event_id=${sp.get('event_id') ?? '?'}, status=${sp.get('status') ?? '?'})`
+} else if (sp.get('image') === 'bulk') {
+  message = `${sp.get('count') ?? '?'}件を一括更新 (status=${sp.get('status') ?? '?'})`
+}
+
+try {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('events')
+    .select(EVENT_SELECT)
+    .eq('status', 'published')
+    .not('image_url', 'is', null)
+    .order('id', { ascending: true })
+  if (error) throw error
+  events = (data ?? []) as AdminEvent[]
+} catch (e) {
+  loadError = e instanceof Error ? e.message : String(e)
+}
+
+function usageStatusOf(event: AdminEvent): string {
+  return event.image_usage_status?.trim() || 'unknown'
+}
+---
+
+<AdminLayout title="Image Reviews" csrfToken={csrfToken}>
+  <h1>Image Reviews</h1>
+  <p class="hint">
+    published イベントの image_usage_status を手動設定。一括操作・Ajax 更新は{' '}
+    <a href="/admin/events/draft/#published-image-list">Draft workspace</a>{' '}
+    を利用してください。
+  </p>
+  {message && <p class="ok">{message}</p>}
+  {loadError && <p class="err">{loadError}</p>}
+
+  {
+    events.map((event) => {
+      const displayImage = resolveEventDisplayImage({
+        image_url: event.image_url,
+        image_usage_status: usageStatusOf(event),
+        image_credit: event.image_credit,
+        category: event.category,
+      })
+      return (
+        <article class="admin-panel image-card" id={`event-${event.id}`}>
+          <div class="image-card-head">
+            <img src={displayImage.src} alt="" width="120" height="80" loading="lazy" />
+            <div>
+              <h2>
+                <a href={`/admin/events/${event.id}/`}>{event.title}</a>
+              </h2>
+              <p class="hint">
+                status: {usageStatusOf(event)} · display: {displayImage.kind}
+              </p>
+            </div>
+          </div>
+          <form method="POST" action="/admin/events/">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="image_usage_update" />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+            {event.image_source && (
+              <input type="hidden" name="image_source" value={event.image_source} />
+            )}
+            <label>
+              image_usage_status
+              <select name="image_usage_status">
+                {IMAGE_USAGE_STATUSES.map((s) => (
+                  <option value={s} selected={usageStatusOf(event) === s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              image_credit
+              <input type="text" name="image_credit" value={event.image_credit ?? ''} />
+            </label>
+            <button type="submit">更新</button>
+          </form>
+        </article>
+      )
+    })
+  }
+</AdminLayout>
+
+<style>
+  .image-card-head {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+
+  .image-card img {
+    object-fit: cover;
+    border-radius: 4px;
+    background: #eee;
+  }
+
+  .image-card label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .image-card select,
+  .image-card input {
+    display: block;
+    margin-top: 0.25rem;
+    min-width: min(100%, 24rem);
+    padding: 0.35rem;
+  }
+
+  .image-card h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1.1rem;
+  }
+</style>

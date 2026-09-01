@@ -28,6 +28,7 @@ import {
 } from '../src/lib/event-field-rules'
 import { normalizeHmToDb } from '../src/lib/event-time-rules'
 import { defaultImageMetaForSource } from '../src/lib/event-image-usage'
+import { isBodyProtectedFromSync } from '../src/lib/event-status'
 import {
   ensureEventSource,
   extractEnjoytokyoEventId,
@@ -595,8 +596,8 @@ async function main() {
           `${LOG} existing event_id=${eventId} status=${existing.status} (published/draft body not overwritten)`,
         )
 
-        // published exact: フィールド差分レビュー（本体は変更しない）
-        if (existing.status === 'published') {
+        // published/hidden exact: フィールド差分レビュー（本体は変更しない）
+        if (isBodyProtectedFromSync(existing.status)) {
           try {
             const address =
               cleanAddressAccess(detail.address) ??

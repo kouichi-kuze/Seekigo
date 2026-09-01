@@ -30,6 +30,7 @@ import {
   type DedupeExisting,
   type DuplicateMatchResult,
 } from '../src/lib/event-dedupe'
+import { isBodyProtectedFromSync } from '../src/lib/event-status'
 import {
   ensureEventSource,
   extractGotokyoSpotId,
@@ -626,15 +627,13 @@ async function main() {
         // 本体は触らず、管理用 last_checked_at のみ（status 条件付き）
         if (writeClient && match.matched_status) {
           await touchLastChecked(writeClient, eventId, match.matched_status)
-          if (match.matched_status === 'published') {
-            summary.published_protected += 1
-          }
-        } else if (match.matched_status === 'published') {
+        }
+        if (isBodyProtectedFromSync(match.matched_status)) {
           summary.published_protected += 1
         }
 
-        // published exact: フィールド差分レビュー（本体は変更しない）
-        if (match.matched_status === 'published') {
+        // published/hidden exact: フィールド差分レビュー（本体は変更しない）
+        if (isBodyProtectedFromSync(match.matched_status)) {
           try {
             await syncFieldReviewsForPublishedEvent(
               writeClient ?? readClient,

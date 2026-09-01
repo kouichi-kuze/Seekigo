@@ -1,0 +1,112 @@
+---
+import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
+import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const { createAdminClient } = await import('../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+type SourceRow = {
+  id: number
+  event_id: number
+  source_name: string
+  source_url: string
+  source_event_id: string | null
+  official_url: string | null
+  last_checked_at: string | null
+  event_title?: string | null
+}
+
+let sources: SourceRow[] = []
+let loadError: string | null = null
+
+try {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('event_sources')
+    .select(
+      'id, event_id, source_name, source_url, source_event_id, official_url, last_checked_at',
+    )
+    .order('last_checked_at', { ascending: false })
+    .limit(300)
+
+  if (error) throw error
+
+  const rows = (data ?? []) as SourceRow[]
+  const eventIds = [...new Set(rows.map((r) => r.event_id))]
+  const titles = new Map<number, string | null>()
+  if (eventIds.length > 0) {
+    const { data: evs } = await admin
+      .from('events')
+      .select('id, title')
+      .in('id', eventIds)
+    for (const e of evs ?? []) {
+      titles.set(Number(e.id), e.title ?? null)
+    }
+  }
+  sources = rows.map((r) => ({
+    ...r,
+    event_title: titles.get(r.event_id) ?? null,
+  }))
+} catch (e) {
+  loadError = e instanceof Error ? e.message : String(e)
+}
+---
+
+<AdminLayout title="Sources" csrfToken={csrfToken}>
+  <h1>Data Sources</h1>
+  <p class="hint">event_sources テーブル（直近300件、last_checked 降順）。</p>
+  {loadError && <p class="err">{loadError}</p>}
+
+  {
+    sources.length > 0 && (
+      <div class="admin-panel">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Event</th>
+              <th>URL</th>
+              <th>Last checked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sources.map((s) => (
+              <tr>
+                <td>
+                  {s.source_name}
+                  {s.source_event_id && (
+                    <div class="sub">{s.source_event_id}</div>
+                  )}
+                </td>
+                <td>
+                  <a href={`/admin/events/${s.event_id}/`}>
+                    #{s.event_id} {s.event_title ?? ''}
+                  </a>
+                </td>
+                <td>
+                  <a href={s.source_url} target="_blank" rel="noopener">
+                    {s.source_url.slice(0, 60)}
+                    {s.source_url.length > 60 ? '…' : ''}
+                  </a>
+                </td>
+                <td>{s.last_checked_at?.slice(0, 19) ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+</AdminLayout>
+
+<style>
+  .sub {
+    font-size: 0.8rem;
+    color: #666;
+  }
+</style>

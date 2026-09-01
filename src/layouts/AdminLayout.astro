@@ -1,0 +1,222 @@
+---
+import AdminSidebar from '../components/admin/AdminSidebar.astro'
+
+interface Props {
+  title: string
+  csrfToken: string
+}
+
+const { title, csrfToken } = Astro.props
+const pathname = Astro.url.pathname
+---
+
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>{title} | Seekigo Admin (DEV)</title>
+  </head>
+  <body class="admin-body">
+    <div class="admin-shell" data-csrf={csrfToken}>
+      <AdminSidebar pathname={pathname} />
+      <div class="admin-main-wrap">
+        <header class="admin-topbar">
+          <button
+            type="button"
+            class="admin-menu-toggle"
+            id="admin-menu-toggle"
+            aria-label="メニューを開く"
+          >
+            ☰
+          </button>
+          <span class="admin-topbar-title">{title}</span>
+          <a href="/tokyo/" class="admin-topbar-link" target="_blank" rel="noopener"
+            >公開サイト ↗</a
+          >
+        </header>
+        <main class="admin-main">
+          <p class="dev-banner">
+            DEV ONLY — ローカル astro dev 専用。本番 dist には含まれません。
+          </p>
+          <slot />
+        </main>
+      </div>
+    </div>
+    <script>
+      const toggle = document.getElementById('admin-menu-toggle')
+      const shell = document.querySelector('.admin-shell')
+      toggle?.addEventListener('click', () => {
+        shell?.classList.toggle('admin-shell--sidebar-open')
+      })
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  .admin-body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    line-height: 1.5;
+    background: #eef1f5;
+    color: #1a1a1a;
+  }
+
+  .admin-shell {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+
+  .admin-main-wrap {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .admin-topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 1rem;
+    background: #fff;
+    border-bottom: 1px solid #d8dee8;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .admin-menu-toggle {
+    display: none;
+    border: 1px solid #ccc;
+    background: #fff;
+    padding: 0.35rem 0.6rem;
+    font-size: 1.1rem;
+    cursor: pointer;
+  }
+
+  .admin-topbar-title {
+    font-weight: 700;
+    flex: 1;
+  }
+
+  .admin-topbar-link {
+    font-size: 0.9rem;
+    color: #0b6bcb;
+  }
+
+  .admin-main {
+    padding: 1rem 1.25rem 5rem;
+    max-width: 1200px;
+  }
+
+  .dev-banner {
+    background: #fff3cd;
+    border: 1px solid #e6c200;
+    padding: 0.65rem 1rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+  }
+
+  .admin-panel {
+    background: #fff;
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .admin-panel h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.15rem;
+  }
+
+  .admin-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .admin-stat {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: #fafbfc;
+  }
+
+  .admin-stat__n {
+    font-size: 1.5rem;
+    font-weight: 800;
+  }
+
+  .admin-stat__label {
+    font-size: 0.85rem;
+    color: #555;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    border-bottom: 1px solid #e2e8f0;
+    padding: 0.5rem 0.65rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .admin-table th {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: #666;
+  }
+
+  .ok {
+    color: #0a7a32;
+    font-weight: 600;
+  }
+
+  .err {
+    color: #a40000;
+  }
+
+  .hint {
+    color: #555;
+    font-size: 0.95rem;
+  }
+
+  @media (max-width: 900px) {
+    .admin-shell {
+      grid-template-columns: 1fr;
+    }
+
+    .admin-menu-toggle {
+      display: inline-block;
+    }
+
+    .admin-sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      width: min(85vw, 280px);
+      z-index: 30;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+    }
+
+    .admin-shell--sidebar-open .admin-sidebar {
+      transform: translateX(0);
+    }
+
+    .admin-shell--sidebar-open::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+      z-index: 25;
+    }
+  }
+</style>

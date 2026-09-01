@@ -1,0 +1,40 @@
+---
+import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import EventListTable from '../../../../components/admin/EventListTable.astro'
+import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
+import { fetchAdminEventList } from '../../../../lib/admin/queries'
+import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const { createAdminClient } = await import('../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+let events: import('../../../../lib/admin/types').AdminEvent[] = []
+let loadError: string | null = null
+let message: string | null = null
+
+const deleted = Astro.url.searchParams.get('deleted')
+const deletedTitle = Astro.url.searchParams.get('title')
+if (deleted === '1') {
+  message = deletedTitle
+    ? `削除しました: ${decodeURIComponent(deletedTitle)}`
+    : 'イベントを削除しました'
+}
+
+try {
+  events = await fetchAdminEventList(createAdminClient(), { kind: 'all' })
+} catch (e) {
+  loadError = e instanceof Error ? e.message : String(e)
+}
+---
+
+<AdminLayout title="All Events" csrfToken={csrfToken}>
+  <h1>All Events</h1>
+  <p class="hint">全ステータス（最大200件、開催日降順）。</p>
+  {message && <p class="ok">{message}</p>}
+  {loadError && <p class="err">{loadError}</p>}
+  <EventListTable events={events} />
+</AdminLayout>

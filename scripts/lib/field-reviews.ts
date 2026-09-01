@@ -277,13 +277,13 @@ export async function syncFieldReviewsForPublishedEvent(
     .from('events')
     .select(EVENT_SELECT_FOR_DIFF)
     .eq('id', opts.eventId)
-    .eq('status', 'published')
+    .in('status', ['published', 'hidden'])
     .maybeSingle()
 
   if (error) throw error
   if (!eventRow) {
     logFieldReview('skipped', {
-      reason: 'published_event_not_found',
+      reason: 'protected_event_not_found',
       event_id: opts.eventId,
     })
     return tally

@@ -1,0 +1,14 @@
+-- soft delete 用 deleted_at 追加案（今回は未適用）
+--
+-- ALTER TABLE public.events
+--   ADD COLUMN IF NOT EXISTS deleted_at timestamptz NULL;
+--
+-- CREATE INDEX IF NOT EXISTS events_deleted_at_idx
+--   ON public.events (deleted_at)
+--   WHERE deleted_at IS NOT NULL;
+--
+-- 公開クエリ例:
+--   .is('deleted_at', null)
+--   .eq('status', 'published')
+--
+-- admin-delete.ts を物理 DELETE から UPDATE deleted_at = now() に切替可能。

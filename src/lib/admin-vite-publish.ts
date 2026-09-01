@@ -61,6 +61,6 @@ export async function handleViteAdminPublish(opts: {
     }
   }
   return {
-    redirectTo: `/admin/events/?error=${encodeURIComponent(result.message)}`,
+    redirectTo: `/admin/events/draft/?error=${encodeURIComponent(result.message)}`,
   }
 }

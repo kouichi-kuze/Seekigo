@@ -1,0 +1,65 @@
+---
+import type { AdminEvent } from '../../lib/admin/types'
+
+interface Props {
+  events: AdminEvent[]
+  showStatus?: boolean
+}
+
+const { events, showStatus = true } = Astro.props
+
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return '—'
+  return d.slice(0, 10)
+}
+---
+
+<div class="admin-panel">
+  {
+    events.length === 0 ? (
+      <p class="hint">該当イベントはありません。</p>
+    ) : (
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            {showStatus && <th>Status</th>}
+            <th>Title</th>
+            <th>Dates</th>
+            <th>Area</th>
+            <th>Venue</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {events.map((ev) => (
+            <tr>
+              <td>{ev.id}</td>
+              {showStatus && <td>{ev.status ?? '—'}</td>}
+              <td>{ev.title ?? '—'}</td>
+              <td>
+                {fmtDate(ev.start_date)}
+                {ev.end_date && ev.end_date !== ev.start_date
+                  ? ` – ${fmtDate(ev.end_date)}`
+                  : ''}
+              </td>
+              <td>{ev.area ?? '—'}</td>
+              <td>{ev.venue ?? '—'}</td>
+              <td>
+                <a href={`/admin/events/${ev.id}/`}>編集</a>
+                {ev.slug && ev.status === 'published' && (
+                  <>
+                    {' · '}
+                    <a href={`/tokyo/event/${ev.slug}/`} target="_blank" rel="noopener">
+                      公開 ↗
+                    </a>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+</div>

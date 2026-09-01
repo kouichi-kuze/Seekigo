@@ -32,6 +32,7 @@ import {
 } from '../src/lib/event-field-rules'
 import { normalizeHmToDb } from '../src/lib/event-time-rules'
 import { defaultImageMetaForSource } from '../src/lib/event-image-usage'
+import { isBodyProtectedFromSync } from '../src/lib/event-status'
 import {
   ensureEventSource,
   extractWalkerplusEventId,
@@ -748,7 +749,7 @@ async function main() {
           `${LOG} existing event_id=${eventId} status=${existing.status} (body not overwritten)`,
         )
 
-        if (existing.status === 'published') {
+        if (isBodyProtectedFromSync(existing.status)) {
           try {
             const area = resolveImportArea(detail)
             const frResult = await syncFieldReviewsForPublishedEvent(

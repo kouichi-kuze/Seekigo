@@ -154,7 +154,7 @@ export async function processAdminImageUsagePost(opts: {
 
     return {
       ok: true,
-      redirectTo: `/admin/events/?image=bulk&count=${updates.length}&status=${encodeURIComponent(status)}`,
+      redirectTo: `/admin/events/reviews/image/?image=bulk&count=${updates.length}&status=${encodeURIComponent(status)}`,
     }
   }
 
@@ -196,6 +196,6 @@ export async function processAdminImageUsagePost(opts: {
 
   return {
     ok: true,
-    redirectTo: `/admin/events/?image=updated&event_id=${eventId}&status=${encodeURIComponent(status)}#event-${eventId}`,
+    redirectTo: `/admin/events/reviews/image/?image=updated&event_id=${eventId}&status=${encodeURIComponent(status)}#event-${eventId}`,
   }
 }

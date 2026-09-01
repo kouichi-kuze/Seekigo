@@ -1,0 +1,42 @@
+---
+import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import EventListTable from '../../../../components/admin/EventListTable.astro'
+import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
+import { fetchAdminEventList } from '../../../../lib/admin/queries'
+import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const { createAdminClient } = await import('../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+let events: import('../../../../lib/admin/types').AdminEvent[] = []
+let loadError: string | null = null
+let hiddenNote: string | null = null
+
+try {
+  events = await fetchAdminEventList(createAdminClient(), {
+    kind: 'status',
+    status: 'hidden',
+  })
+} catch (e) {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (msg.includes('hidden') || msg.includes('check') || msg.includes('invalid')) {
+    hiddenNote =
+      'status=hidden が DB に未追加の可能性があります。scripts/migrate-add-hidden-status.sql を参照してください。'
+  }
+  loadError = msg
+}
+---
+
+<AdminLayout title="Hidden Events" csrfToken={csrfToken}>
+  <h1>Hidden</h1>
+  <p class="hint">
+    公開サイト・sitemap から除外。sync 本体は published と同様保護されます。
+  </p>
+  {hiddenNote && <p class="err">{hiddenNote}</p>}
+  {loadError && !hiddenNote && <p class="err">{loadError}</p>}
+  {!loadError && <EventListTable events={events} showStatus={false} />}
+</AdminLayout>
