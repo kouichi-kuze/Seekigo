@@ -7,6 +7,10 @@ on:
     # 毎日 JST 05:00 = UTC 20:00（前日）
     - cron: "0 20 * * *"
 
+concurrency:
+  group: seekigo-production-deploy
+  cancel-in-progress: false
+
 jobs:
   sync-events:
     runs-on: ubuntu-latest
