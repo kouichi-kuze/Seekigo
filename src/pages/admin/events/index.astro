@@ -18,6 +18,7 @@ if (!import.meta.env.DEV) {
 const { createAdminClient } = await import('../../../lib/supabase-admin')
 const { getOrCreateAdminCsrfToken } = await import('../../../lib/admin-security')
 const { IMAGE_USAGE_STATUSES } = await import('../../../lib/event-image-usage')
+const { resolveEventDisplayImage } = await import('../../../lib/event-image-usage')
 const { formatFieldValueForDisplay } = await import(
   '../../../lib/event-field-review'
 )
@@ -100,6 +101,9 @@ if (bulkCount && !message) {
   message = 'この候補を登録しない（rejected）にしました'
 } else if (imageUpdated === 'updated') {
   message = `画像利用ステータスを更新しました (event_id=${reviewEventId ?? '?'}, status=${imageStatus ?? '?'})`
+} else if (imageUpdated === 'bulk') {
+  const n = Astro.url.searchParams.get('count')
+  message = `${n ?? '?'}件の画像利用ステータスを一括更新しました (status=${imageStatus ?? '?'})`
 } else if (Astro.url.searchParams.get('field') === 'accepted') {
   message = `フィールド変更を採用しました (review_id=${Astro.url.searchParams.get('review_id') ?? '?'}, field=${Astro.url.searchParams.get('fname') ?? '?'})`
 } else if (Astro.url.searchParams.get('field') === 'rejected') {
@@ -311,6 +315,15 @@ function displayVal(value: unknown): string {
 function usageStatusOf(event: AdminEvent): string {
   return event.image_usage_status?.trim() || 'unknown'
 }
+
+function eventDisplayImage(event: AdminEvent) {
+  return resolveEventDisplayImage({
+    image_url: event.image_url,
+    image_usage_status: usageStatusOf(event),
+    image_credit: event.image_credit,
+    category: event.category,
+  })
+}
 ---
 
 <html lang="ja">
@@ -322,7 +335,7 @@ function usageStatusOf(event: AdminEvent): string {
   </head>
 
   <body>
-    <main class="admin">
+    <main class="admin" data-csrf={csrfToken}>
       <p class="dev-banner">
         DEV ONLY — ローカル astro dev 専用です。本番 dist / Xserver には管理機能を含めません。
       </p>
@@ -343,6 +356,24 @@ function usageStatusOf(event: AdminEvent): string {
       {message && <p class="ok">{message}</p>}
       {errorMessage && <p class="err">{errorMessage}</p>}
       {loadError && <p class="err">Load error: {loadError}</p>}
+
+      {(events.length > 0 || publishedImageEvents.length > 0) && (
+        <div class="usage-filter-bar">
+          <label class="filter-label">
+            image_usage_status
+            <select id="usage-filter">
+              <option value="all">all</option>
+              {IMAGE_USAGE_STATUSES.map((s) => (
+                <option value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+          <button type="button" class="btn-filter-quick" id="filter-unknown-only">
+            unknown のみ
+          </button>
+          <span id="filter-visible-count" class="filter-count" />
+        </div>
+      )}
 
       <section class="review-section" id="dedupe-reviews">
         <h2>重複候補レビュー</h2>
@@ -650,7 +681,7 @@ function usageStatusOf(event: AdminEvent): string {
 
       <hr class="divider" />
 
-      <section>
+      <section id="draft-list">
         <h2>Draft 一覧</h2>
 
       {!loadError && events.length === 0 && (
@@ -676,22 +707,45 @@ function usageStatusOf(event: AdminEvent): string {
         </form>
       )}
 
-      <div class="list">
-        {events.map((event) => (
-          <article class="card">
+      <div class="list" id="draft-event-list">
+        {events.map((event) => {
+          const displayImage = eventDisplayImage(event)
+          return (
+          <article
+            class="card event-row"
+            id={`event-${event.id}`}
+            data-event-id={String(event.id)}
+            data-usage-status={usageStatusOf(event)}
+            data-event-status={event.status ?? 'draft'}
+          >
             <label class="row-select">
               <input
                 type="checkbox"
                 name="event_ids"
                 value={String(event.id)}
-                class="row-check"
+                class="event-select row-check"
                 form="bulk-form"
               />
               <span class="sr-only">選択: {event.title}</span>
             </label>
 
             <div class="card-body">
-              <h2>{event.title}</h2>
+              <div class="card-head">
+                <div class="event-thumb" data-thumb-kind={displayImage.kind}>
+                  <img
+                    src={displayImage.src}
+                    alt=""
+                    loading="lazy"
+                    width="120"
+                    height="80"
+                    class="event-thumb-img"
+                  />
+                  <span class="thumb-kind">{displayImage.kind}</span>
+                </div>
+                <div class="card-head-text">
+                  <h2>{event.title}</h2>
+                </div>
+              </div>
 
               <dl>
                 <div>
@@ -789,7 +843,9 @@ function usageStatusOf(event: AdminEvent): string {
                   </div>
                   <div>
                     <dt>image_usage_status</dt>
-                    <dd>{displayVal(event.image_usage_status ?? 'unknown')}</dd>
+                    <dd class="usage-status-display">
+                      {displayVal(event.image_usage_status ?? 'unknown')}
+                    </dd>
                   </div>
                   <div>
                     <dt>image_credit</dt>
@@ -797,9 +853,9 @@ function usageStatusOf(event: AdminEvent): string {
                   </div>
                 </dl>
                 <p class="image-note">
-                  管理画面でも画像は自動表示しません（hotlink 回避）。
+                  一覧画像は公開側と同じ resolveEventDisplayImage() を使用（許可外は category / generic フォールバック）。
                 </p>
-                <form method="POST" class="image-form">
+                <form method="POST" class="image-form" data-event-id={String(event.id)}>
                   <input type="hidden" name="csrf_token" value={csrfToken} />
                   <input
                     type="hidden"
@@ -837,7 +893,8 @@ function usageStatusOf(event: AdminEvent): string {
                       placeholder="クレジット表記"
                     />
                   </label>
-                  <button type="submit">画像利用を更新</button>
+                  <button type="submit" class="btn-image-update">画像利用を更新</button>
+                  <span class="row-flash" aria-live="polite" hidden />
                 </form>
               </div>
 
@@ -849,26 +906,58 @@ function usageStatusOf(event: AdminEvent): string {
               </form>
             </div>
           </article>
-        ))}
+          )
+        })}
       </div>
       </section>
 
       {publishedImageEvents.length > 0 && (
         <>
           <hr class="divider" />
-          <section>
+          <section id="published-image-list">
             <h2>Published 画像ステータス（手動のみ）</h2>
             <p class="hint">
-              sync は published の image_* を変更しません。利用許諾の確定はここでのみ行います。画像は表示しません。
+              sync は published の image_* を変更しません。利用許諾の確定はここでのみ行います。
             </p>
             <div class="list">
-              {publishedImageEvents.map((event) => (
-                <article class="card card--published-image">
+              {publishedImageEvents.map((event) => {
+                const displayImage = eventDisplayImage(event)
+                return (
+                <article
+                  class="card card--published-image event-row"
+                  id={`event-${event.id}`}
+                  data-event-id={String(event.id)}
+                  data-usage-status={usageStatusOf(event)}
+                  data-event-status="published"
+                >
+                  <label class="row-select">
+                    <input
+                      type="checkbox"
+                      value={String(event.id)}
+                      class="event-select"
+                    />
+                    <span class="sr-only">選択: {event.title}</span>
+                  </label>
                   <div class="card-body">
-                    <h2>
-                      {event.title}
-                      <span class="pub-badge">published</span>
-                    </h2>
+                    <div class="card-head">
+                      <div class="event-thumb" data-thumb-kind={displayImage.kind}>
+                        <img
+                          src={displayImage.src}
+                          alt=""
+                          loading="lazy"
+                          width="120"
+                          height="80"
+                          class="event-thumb-img"
+                        />
+                        <span class="thumb-kind">{displayImage.kind}</span>
+                      </div>
+                      <div class="card-head-text">
+                        <h2>
+                          {event.title}
+                          <span class="pub-badge">published</span>
+                        </h2>
+                      </div>
+                    </div>
                     <dl class="image-dl">
                       <div>
                         <dt>id / slug</dt>
@@ -898,7 +987,7 @@ function usageStatusOf(event: AdminEvent): string {
                       </div>
                       <div>
                         <dt>image_usage_status</dt>
-                        <dd>
+                        <dd class="usage-status-display">
                           {displayVal(event.image_usage_status ?? 'unknown')}
                         </dd>
                       </div>
@@ -907,7 +996,7 @@ function usageStatusOf(event: AdminEvent): string {
                         <dd>{displayVal(event.image_credit)}</dd>
                       </div>
                     </dl>
-                    <form method="POST" class="image-form">
+                    <form method="POST" class="image-form" data-event-id={String(event.id)}>
                       <input
                         type="hidden"
                         name="csrf_token"
@@ -952,56 +1041,180 @@ function usageStatusOf(event: AdminEvent): string {
                           placeholder="クレジット表記"
                         />
                       </label>
-                      <button type="submit">画像利用を更新</button>
+                      <button type="submit" class="btn-image-update">画像利用を更新</button>
+                      <span class="row-flash" aria-live="polite" hidden />
                     </form>
                   </div>
                 </article>
-              ))}
+                )
+              })}
             </div>
           </section>
         </>
       )}
+
+      {(events.length > 0 || publishedImageEvents.length > 0) && (
+        <div class="image-action-bar" id="image-action-bar">
+          <div class="image-action-bar__inner">
+            <label class="select-all">
+              <input type="checkbox" id="select-all-visible" />
+              表示中をすべて選択
+            </label>
+            <span id="image-selected-count" class="selected-count">0件選択</span>
+            <label class="bulk-usage-label">
+              一括ステータス
+              <select id="bulk-usage-status" class="usage-select">
+                {IMAGE_USAGE_STATUSES.map((s) => (
+                  <option value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <button type="button" id="bulk-usage-apply" disabled>
+              選択した0件の画像利用を更新
+            </button>
+            <span id="bulk-action-feedback" class="bulk-action-feedback" aria-live="polite" />
+          </div>
+        </div>
+      )}
     </main>
 
-    <script>
+    <div id="admin-toast" class="admin-toast" hidden aria-live="polite" />
+
+    <script define:vars={{ imageUsageStatuses: IMAGE_USAGE_STATUSES }}>
+      const adminMain = document.querySelector('.admin')
+      const csrfToken = adminMain?.getAttribute('data-csrf') ?? ''
+
       const selectAll = document.getElementById(
         'select-all',
-      ) as HTMLInputElement | null
-      const checks = Array.from(
-        document.querySelectorAll<HTMLInputElement>('.row-check'),
+      )
+      const selectAllVisible = document.getElementById(
+        'select-all-visible',
+      )
+      const eventSelects = Array.from(
+        document.querySelectorAll('.event-select'),
       )
       const countEl = document.getElementById('selected-count')
-      const bulkBtn = document.getElementById(
-        'bulk-publish',
-      ) as HTMLButtonElement | null
-      const bulkForm = document.getElementById(
-        'bulk-form',
-      ) as HTMLFormElement | null
+      const bulkBtn = document.getElementById('bulk-publish')
+      const bulkForm = document.getElementById('bulk-form')
 
-      function refresh() {
-        const selected = checks.filter((c) => c.checked)
+      const usageFilter = document.getElementById('usage-filter')
+      const filterUnknownBtn = document.getElementById('filter-unknown-only')
+      const filterVisibleCount = document.getElementById('filter-visible-count')
+      const imageSelectedCount = document.getElementById('image-selected-count')
+      const bulkUsageStatus = document.getElementById('bulk-usage-status')
+      const bulkUsageApply = document.getElementById('bulk-usage-apply')
+      const bulkActionFeedback = document.getElementById('bulk-action-feedback')
+      const adminToast = document.getElementById('admin-toast')
+      let toastTimer = 0
+      let feedbackTimer = 0
+
+      function visibleEventRows() {
+        return Array.from(
+          document.querySelectorAll('.event-row'),
+        ).filter((row) => !row.classList.contains('event-row--hidden'))
+      }
+
+      function visibleEventSelects() {
+        return visibleEventRows()
+          .map((row) =>
+            row.querySelector('.event-select'),
+          )
+          .filter(Boolean)
+      }
+
+      function selectedEventSelects() {
+        return eventSelects.filter((c) => c.checked)
+      }
+
+      function refreshPublishToolbar() {
+        const draftChecks = eventSelects.filter(
+          (c) => c.classList.contains('row-check'),
+        )
+        const selected = draftChecks.filter((c) => c.checked)
         if (countEl) countEl.textContent = `${selected.length}件選択`
         if (bulkBtn) bulkBtn.disabled = selected.length === 0
         if (selectAll) {
           selectAll.checked =
-            checks.length > 0 && selected.length === checks.length
+            draftChecks.length > 0 && selected.length === draftChecks.length
           selectAll.indeterminate =
-            selected.length > 0 && selected.length < checks.length
+            selected.length > 0 && selected.length < draftChecks.length
         }
+      }
+
+      function refreshImageToolbar() {
+        const selected = selectedEventSelects()
+        const n = selected.length
+        if (imageSelectedCount) {
+          imageSelectedCount.textContent = `${n}件選択`
+        }
+        if (bulkUsageApply) {
+          bulkUsageApply.disabled = n === 0
+          bulkUsageApply.textContent = `選択した${n}件の画像利用を更新`
+        }
+        const visible = visibleEventSelects()
+        const visibleSelected = visible.filter((c) => c.checked)
+        if (selectAllVisible) {
+          selectAllVisible.checked =
+            visible.length > 0 && visibleSelected.length === visible.length
+          selectAllVisible.indeterminate =
+            visibleSelected.length > 0 &&
+            visibleSelected.length < visible.length
+        }
+      }
+
+      function refreshToolbars() {
+        refreshPublishToolbar()
+        refreshImageToolbar()
+      }
+
+      function applyUsageFilter(value) {
+        const rows = document.querySelectorAll('.event-row')
+        let visible = 0
+        for (const row of rows) {
+          const status = row.getAttribute('data-usage-status') ?? 'unknown'
+          const show = value === 'all' || status === value
+          row.classList.toggle('event-row--hidden', !show)
+          if (show) visible += 1
+        }
+        if (filterVisibleCount) {
+          filterVisibleCount.textContent = `表示 ${visible} 件`
+        }
+        refreshToolbars()
       }
 
       selectAll?.addEventListener('change', () => {
         const on = selectAll.checked
-        for (const c of checks) c.checked = on
-        refresh()
+        for (const c of eventSelects) {
+          if (c.classList.contains('row-check')) c.checked = on
+        }
+        refreshToolbars()
       })
 
-      for (const c of checks) {
-        c.addEventListener('change', refresh)
+      selectAllVisible?.addEventListener('change', () => {
+        const on = selectAllVisible.checked
+        for (const c of visibleEventSelects()) {
+          c.checked = on
+        }
+        refreshToolbars()
+      })
+
+      for (const c of eventSelects) {
+        c.addEventListener('change', refreshToolbars)
       }
 
+      usageFilter?.addEventListener('change', () => {
+        applyUsageFilter(usageFilter.value)
+      })
+
+      filterUnknownBtn?.addEventListener('click', () => {
+        if (usageFilter) usageFilter.value = 'unknown'
+        applyUsageFilter('unknown')
+      })
+
       bulkForm?.addEventListener('submit', (e) => {
-        const selected = checks.filter((c) => c.checked)
+        const selected = eventSelects.filter(
+          (c) => c.classList.contains('row-check') && c.checked,
+        )
         if (selected.length === 0) {
           e.preventDefault()
           return
@@ -1013,14 +1226,12 @@ function usageStatusOf(event: AdminEvent): string {
         }
       })
 
-      for (const form of document.querySelectorAll<HTMLFormElement>(
+      for (const form of document.querySelectorAll(
         '.review-actions form',
       )) {
         form.addEventListener('submit', (e) => {
-          const intent = (
-            form.querySelector(
-              'input[name="intent"]',
-            ) as HTMLInputElement | null
+          const intent = form.querySelector(
+            'input[name="intent"]',
           )?.value
           let msg = '実行しますか？'
           if (intent === 'dedupe_link') {
@@ -1041,23 +1252,218 @@ function usageStatusOf(event: AdminEvent): string {
         })
       }
 
-      function syncCreditVisibility(form: HTMLFormElement) {
-        const select = form.querySelector<HTMLSelectElement>('.usage-select')
-        const credit = form.querySelector<HTMLElement>('.credit-field')
+      function syncCreditVisibility(form) {
+        const select = form.querySelector('.usage-select')
+        const credit = form.querySelector('.credit-field')
         if (!select || !credit) return
         const show =
           select.value === 'licensed' || select.value === 'organizer_granted'
         credit.hidden = !show
       }
-      for (const form of document.querySelectorAll<HTMLFormElement>(
-        '.image-form',
-      )) {
-        const select = form.querySelector<HTMLSelectElement>('.usage-select')
+
+      for (const form of document.querySelectorAll('.image-form')) {
+        const select = form.querySelector('.usage-select')
         select?.addEventListener('change', () => syncCreditVisibility(form))
         syncCreditVisibility(form)
       }
 
-      refresh()
+      function updateRowFromResponse(row, update) {
+        const statusEl = row.querySelector('.usage-status-display')
+        if (statusEl) {
+          statusEl.textContent = update.image_usage_status
+        }
+        row.setAttribute('data-usage-status', update.image_usage_status)
+
+        const select = row.querySelector('.usage-select')
+        if (select) select.value = update.image_usage_status
+
+        const creditInput = row.querySelector('input[name="image_credit"]')
+        if (creditInput) {
+          creditInput.value = update.image_credit ?? ''
+        }
+
+        const thumb = row.querySelector('.event-thumb')
+        const img = row.querySelector('.event-thumb-img')
+        const kind = row.querySelector('.thumb-kind')
+        const display = update.display_image
+        if (thumb && img && display) {
+          img.src = display.src
+          thumb.setAttribute('data-thumb-kind', display.kind)
+          if (kind) kind.textContent = display.kind
+        }
+      }
+
+      function flashRow(row, text) {
+        row.classList.add('event-row--updated')
+        const flash = row.querySelector('.row-flash')
+        if (flash) {
+          flash.textContent = text
+          flash.hidden = false
+        }
+        window.setTimeout(() => {
+          row.classList.remove('event-row--updated')
+          if (flash) {
+            flash.hidden = true
+            flash.textContent = ''
+          }
+        }, 2000)
+      }
+
+      function showToast(message, isError) {
+        if (!adminToast) return
+        window.clearTimeout(toastTimer)
+        adminToast.textContent = message
+        adminToast.classList.toggle('admin-toast--err', Boolean(isError))
+        adminToast.classList.toggle('admin-toast--ok', !isError)
+        adminToast.hidden = false
+        toastTimer = window.setTimeout(() => {
+          adminToast.hidden = true
+        }, 4000)
+      }
+
+      function showBulkFeedback(message) {
+        if (!bulkActionFeedback) return
+        window.clearTimeout(feedbackTimer)
+        bulkActionFeedback.textContent = message
+        bulkActionFeedback.classList.add('bulk-action-feedback--visible')
+        feedbackTimer = window.setTimeout(() => {
+          bulkActionFeedback.textContent = ''
+          bulkActionFeedback.classList.remove('bulk-action-feedback--visible')
+        }, 3000)
+      }
+
+      function formDataToUrlEncoded(formData) {
+        const body = new URLSearchParams()
+        for (const [key, value] of formData.entries()) {
+          body.append(key, typeof value === 'string' ? value : String(value))
+        }
+        return body
+      }
+
+      async function postImageForm(formData) {
+        formData.set('ajax', '1')
+        if (!formData.get('csrf_token') && csrfToken) {
+          formData.set('csrf_token', csrfToken)
+        }
+        const res = await fetch('/admin/events/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          },
+          body: formDataToUrlEncoded(formData).toString(),
+          credentials: 'same-origin',
+        })
+        const text = await res.text()
+        let data
+        try {
+          data = JSON.parse(text)
+        } catch {
+          throw new Error(
+            `サーバー応答が不正です (HTTP ${res.status})。dev サーバーを再起動してください。`,
+          )
+        }
+        if (!res.ok || !data.ok) {
+          throw new Error(data.message ?? `HTTP ${res.status}`)
+        }
+        return data
+      }
+
+      for (const form of document.querySelectorAll('.image-form')) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault()
+          const btn = form.querySelector('.btn-image-update')
+          const prevBtnLabel = btn?.textContent ?? ''
+          if (btn) {
+            btn.disabled = true
+            btn.textContent = '更新中…'
+          }
+          try {
+            const data = await postImageForm(new FormData(form))
+            for (const update of data.updates ?? []) {
+              const row = document.getElementById(
+                `event-${update.event_id}`,
+              )
+              if (!row) continue
+              updateRowFromResponse(row, update)
+              flashRow(row, '更新済み ✓')
+            }
+            const u = data.updates?.[0]
+            if (u) {
+              showToast(
+                `更新完了 ✓（event_id=${u.event_id} → ${u.image_usage_status}）`,
+                false,
+              )
+            } else {
+              showToast('更新完了 ✓', false)
+            }
+          } catch (err) {
+            showToast(
+              err instanceof Error ? err.message : String(err),
+              true,
+            )
+          } finally {
+            if (btn) {
+              btn.disabled = false
+              btn.textContent = prevBtnLabel
+            }
+          }
+        })
+      }
+
+      bulkUsageApply?.addEventListener('click', async () => {
+        const selected = selectedEventSelects()
+        if (selected.length === 0) return
+        const status = bulkUsageStatus?.value ?? ''
+        if (
+          !confirm(
+            `選択した${selected.length}件の image_usage_status を「${status}」に更新します。よろしいですか？`,
+          )
+        ) {
+          return
+        }
+
+        bulkUsageApply.disabled = true
+        const prevLabel = bulkUsageApply.textContent
+        bulkUsageApply.textContent = '更新中…'
+        try {
+          const fd = new FormData()
+          fd.set('csrf_token', csrfToken)
+          fd.set('intent', 'image_usage_bulk')
+          fd.set('image_usage_status', status)
+          for (const c of selected) {
+            fd.append('event_ids', c.value)
+          }
+          const data = await postImageForm(fd)
+          const count = data.updates?.length ?? 0
+          for (const update of data.updates ?? []) {
+            const row = document.getElementById(`event-${update.event_id}`)
+            if (!row) continue
+            updateRowFromResponse(row, update)
+            flashRow(row, '更新済み ✓')
+          }
+          const doneMsg = `${count}件の更新が完了しました ✓（→ ${status}）`
+          showToast(doneMsg, false)
+          showBulkFeedback('更新完了 ✓')
+          refreshToolbars()
+        } catch (err) {
+          showToast(
+            `更新に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+            true,
+          )
+          showBulkFeedback('更新失敗')
+        } finally {
+          bulkUsageApply.textContent = prevLabel
+          bulkUsageApply.disabled = selectedEventSelects().length === 0
+        }
+      })
+
+      if (location.hash.startsWith('#event-')) {
+        const target = document.querySelector(location.hash)
+        target?.scrollIntoView({ block: 'center' })
+      }
+
+      applyUsageFilter(usageFilter?.value ?? 'all')
+      refreshToolbars()
     </script>
   </body>
 </html>
@@ -1067,8 +1473,80 @@ function usageStatusOf(event: AdminEvent): string {
     max-width: 1100px;
     margin: 0 auto;
     padding: 1.5rem;
+    padding-bottom: 5.5rem;
     font-family: system-ui, sans-serif;
     line-height: 1.5;
+  }
+
+  .admin-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 5.25rem;
+    z-index: 40;
+    transform: translateX(-50%);
+    max-width: min(92vw, 640px);
+    margin: 0;
+    padding: 0.75rem 1.25rem;
+    border-radius: 8px;
+    font-weight: 700;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+  }
+
+  .admin-toast--ok {
+    background: #e8f5e9;
+    border: 2px solid #66bb6a;
+    color: #1b5e20;
+  }
+
+  .admin-toast--err {
+    background: #fdecea;
+    border: 2px solid #e57373;
+    color: #b71c1c;
+  }
+
+  .bulk-action-feedback {
+    font-weight: 700;
+    color: #0a7a32;
+    min-width: 5rem;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .bulk-action-feedback--visible {
+    opacity: 1;
+  }
+
+  .usage-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    margin: 1rem 0 1.5rem;
+    padding: 0.75rem 1rem;
+    background: #f0f4f8;
+    border: 1px solid #cfd8e3;
+  }
+
+  .filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+  }
+
+  .filter-count {
+    color: #555;
+    font-size: 0.95rem;
+  }
+
+  .btn-filter-quick {
+    padding: 0.35rem 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #bbb;
   }
 
   .dev-banner {
@@ -1241,6 +1719,96 @@ function usageStatusOf(event: AdminEvent): string {
     align-items: start;
   }
 
+  .event-row--hidden {
+    display: none;
+  }
+
+  .event-row--updated {
+    border-color: #81c784;
+    background: #f1fbf3;
+    box-shadow: 0 0 0 2px rgba(129, 199, 132, 0.35);
+  }
+
+  .card-head {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+
+  .card-head-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-head-text h2 {
+    margin: 0;
+  }
+
+  .event-thumb {
+    position: relative;
+    flex-shrink: 0;
+    width: 120px;
+    height: 80px;
+    border: 1px solid #ddd;
+    background: #f5f5f5;
+    overflow: hidden;
+  }
+
+  .event-thumb-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .thumb-kind {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+  }
+
+  .row-flash {
+    display: inline-block;
+    margin-left: 0.5rem;
+    font-weight: 700;
+    color: #0a7a32;
+  }
+
+  .image-action-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    background: #fff;
+    border-top: 2px solid #0b6bcb;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  .image-action-bar__inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 0.75rem 1.5rem;
+  }
+
+  .bulk-usage-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+  }
+
   .row-select {
     display: block;
     padding-top: 0.25rem;
@@ -1380,7 +1948,7 @@ function usageStatusOf(event: AdminEvent): string {
   }
 
   .card--published-image {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
   }
 
   .field-review-list {

@@ -14,6 +14,7 @@ type AdminCookies = {
 
 export type AdminPostResult =
   | { ok: true; redirectTo: string }
+  | { ok: true; ajax: true; updates: import('./admin-image-usage').ImageUsageUpdateResult[] }
   | { ok: false; message: string }
 
 /** @deprecated alias */
@@ -37,7 +38,7 @@ export async function processAdminPublishPost(opts: {
     return processAdminDedupeReviewPost({ request, url, cookies, form })
   }
 
-  if (intent === 'image_usage_update') {
+  if (intent === 'image_usage_update' || intent === 'image_usage_bulk') {
     return processAdminImageUsagePost({ request, url, cookies, form })
   }
 

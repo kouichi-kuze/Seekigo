@@ -1,5 +1,5 @@
 ---
-import { resolveImageCategorySlug, getCategoryImagePath } from '../lib/event-category-images'
+import { resolveEventDisplayImage } from '../lib/event-image-usage'
 import { isEventEnded } from '../lib/display'
 
 interface Props {
@@ -8,6 +8,8 @@ interface Props {
     slug?: string | null
     title: string
     image_url?: string | null
+    image_usage_status?: string | null
+    image_credit?: string | null
     start_date?: string | null
     end_date?: string | null
     venue?: string | null
@@ -35,13 +37,8 @@ const dateLabel = (() => {
   return event.start_date
 })()
 
-const categorySlug = resolveImageCategorySlug(event.category, {
-  is_kids:   event.is_kids,
-  is_night:  event.is_night,
-  is_free:   event.is_free,
-  is_indoor: event.is_indoor,
-})
-const fallbackImagePath = getCategoryImagePath(categorySlug)
+const displayImage = resolveEventDisplayImage(event)
+const isFallbackImage = displayImage.kind !== 'external'
 
 const detailUrl = event.slug ? `/tokyo/event/${event.slug}/` : null
 const isEnded = isEventEnded(event.start_date, event.end_date)
@@ -59,12 +56,12 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
   <!-- Image -->
   <div class="card-image">
     <img
-      src={event.image_url ?? fallbackImagePath}
+      src={displayImage.src}
       alt={event.title}
       loading="lazy"
       decoding="async"
       class:list={[
-        !event.image_url && 'card-image--fallback',
+        isFallbackImage && 'card-image--fallback',
         isEnded && 'card-image--ended',
       ]}
     />

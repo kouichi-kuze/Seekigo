@@ -20,24 +20,39 @@ function seekigoAdminPublishDev() {
         });
         req.on('end', () => {
           void (async () => {
+            const body = Buffer.concat(chunks).toString('utf8');
             try {
-              const body = Buffer.concat(chunks).toString('utf8');
               const host = req.headers.host ?? 'localhost:4321';
               const origin = `http://${host}`;
               const { handleViteAdminPublish } = await server.ssrLoadModule(
                 '/src/lib/admin-vite-publish.ts',
               );
-              const { redirectTo } = await handleViteAdminPublish({
+              const result = await handleViteAdminPublish({
                 body,
                 cookieHeader: req.headers.cookie ?? '',
                 origin,
+                originHeader: req.headers.origin ?? '',
+                refererHeader: req.headers.referer ?? '',
               });
+              if ('json' in result) {
+                res.statusCode = result.status ?? 200;
+                res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                res.end(JSON.stringify(result.json));
+                return;
+              }
               res.statusCode = 302;
-              res.setHeader('Location', redirectTo);
+              res.setHeader('Location', result.redirectTo);
               res.end();
             } catch (error) {
               const message =
                 error instanceof Error ? error.message : String(error);
+              const wantsJson = new URLSearchParams(body).get('ajax') === '1';
+              if (wantsJson) {
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                res.end(JSON.stringify({ ok: false, message }));
+                return;
+              }
               res.statusCode = 302;
               res.setHeader(
                 'Location',
