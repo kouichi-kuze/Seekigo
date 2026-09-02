@@ -24,7 +24,7 @@ try {
 
 <AdminLayout title="Ended Events" csrfToken={csrfToken}>
   <h1>Ended</h1>
-  <p class="hint">published かつ end_date &lt; 今日 のイベント。</p>
+  <p class="hint">published かつ end_date &lt; 今日。終了日の新しい順です。</p>
   {loadError && <p class="err">{loadError}</p>}
   <EventListTable events={events} showStatus={false} />
 </AdminLayout>

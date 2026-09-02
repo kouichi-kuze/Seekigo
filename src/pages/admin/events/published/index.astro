@@ -27,7 +27,9 @@ try {
 
 <AdminLayout title="Published Events" csrfToken={csrfToken}>
   <h1>Published</h1>
-  <p class="hint">公開サイトに載るイベント（status = published）。</p>
+  <p class="hint">
+    公開サイトに載るイベント（status = published）。開催中 → これから → 日付不明 → 終了の順です。
+  </p>
   {loadError && <p class="err">{loadError}</p>}
   <EventListTable events={events} showStatus={false} />
 </AdminLayout>

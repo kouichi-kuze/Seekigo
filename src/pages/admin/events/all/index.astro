@@ -33,7 +33,7 @@ try {
 
 <AdminLayout title="All Events" csrfToken={csrfToken}>
   <h1>All Events</h1>
-  <p class="hint">全ステータス（最大200件、開催日降順）。</p>
+  <p class="hint">全ステータス（最大200件）。開催中 → これから → 日付不明 → 終了の順です。</p>
   {message && <p class="ok">{message}</p>}
   {loadError && <p class="err">{loadError}</p>}
   <EventListTable events={events} />

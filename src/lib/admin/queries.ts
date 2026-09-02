@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { tokyoTodayYmd } from '../display'
+import { sortAdminEventsEnded, sortAdminEventsOperational } from './event-sort'
 import { ADMIN_EVENT_SELECT, type AdminEvent } from './types'
 
 export type AdminDashboardStats = {
@@ -14,7 +16,7 @@ export type AdminDashboardStats = {
 export async function fetchAdminDashboardStats(
   admin: SupabaseClient,
 ): Promise<AdminDashboardStats> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = tokyoTodayYmd()
 
   const [draftRes, pubRes, hiddenRes, endedRes, dedupeRes, fieldRes, imgRes] =
     await Promise.all([
@@ -63,20 +65,21 @@ export async function fetchAdminEventList(
   filter: AdminEventListFilter,
   limit = 200,
 ): Promise<AdminEvent[]> {
-  let query = admin
-    .from('events')
-    .select(ADMIN_EVENT_SELECT)
-    .order('start_date', { ascending: false, nullsFirst: false })
-    .limit(limit)
+  let query = admin.from('events').select(ADMIN_EVENT_SELECT).limit(limit)
 
   if (filter.kind === 'status') {
     query = query.eq('status', filter.status)
   } else if (filter.kind === 'ended') {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = tokyoTodayYmd()
     query = query.eq('status', 'published').lt('end_date', today)
   }
 
   const { data, error } = await query
   if (error) throw error
-  return (data ?? []) as AdminEvent[]
+  const events = (data ?? []) as AdminEvent[]
+
+  if (filter.kind === 'ended') {
+    return sortAdminEventsEnded(events)
+  }
+  return sortAdminEventsOperational(events)
 }
