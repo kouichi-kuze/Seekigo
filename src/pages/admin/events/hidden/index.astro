@@ -34,7 +34,7 @@ try {
 <AdminLayout title="Hidden Events" csrfToken={csrfToken}>
   <h1>Hidden</h1>
   <p class="hint">
-    公開サイト・sitemap から除外。sync 本体は published と同様保護されます。開催中 → これから → 日付不明 → 終了の順です。
+    公開サイト・sitemap から除外。sync 本体は published と同様保護されます。これから → 開催中 → 日付不明 → 終了の順です。
   </p>
   {hiddenNote && <p class="err">{hiddenNote}</p>}
   {loadError && !hiddenNote && <p class="err">{loadError}</p>}

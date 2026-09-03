@@ -12,8 +12,8 @@ export type AdminEventScheduleGroup =
   | 'ended'
 
 const GROUP_RANK: Record<AdminEventScheduleGroup, number> = {
-  ongoing: 0,
-  upcoming: 1,
+  upcoming: 0,
+  ongoing: 1,
   unknown: 2,
   ended: 3,
 }
@@ -25,6 +25,14 @@ function isValidYmd(value: string | null | undefined): boolean {
 
 /** 一覧用の開催区分（isEventEnded と整合） */
 export function getAdminEventScheduleGroup(
+  event: Pick<AdminEvent, 'start_date' | 'end_date'>,
+  today: string = tokyoTodayYmd(),
+): AdminEventScheduleGroup {
+  return classifyAdminEventTiming(event, today)
+}
+
+/** getAdminEventScheduleGroup の別名（管理画面デバッグ・ドキュメント用） */
+export function classifyAdminEventTiming(
   event: Pick<AdminEvent, 'start_date' | 'end_date'>,
   today: string = tokyoTodayYmd(),
 ): AdminEventScheduleGroup {
@@ -41,6 +49,26 @@ export function getAdminEventScheduleGroup(
   return 'ongoing'
 }
 
+/** DEV ログ用: グループ + グループ内ソートキー */
+export function getAdminEventSortKey(
+  event: AdminEvent,
+  today: string = tokyoTodayYmd(),
+): string {
+  const group = classifyAdminEventTiming(event, today)
+  switch (group) {
+    case 'ongoing':
+      return `${group}:${event.start_date?.trim() ?? ''}`
+    case 'upcoming':
+      return `${group}:${event.start_date?.trim() ?? ''}`
+    case 'unknown':
+      return `${group}:${event.updated_at ?? ''}`
+    case 'ended':
+      return `${group}:${endedSortKey(event)}`
+    default:
+      return group
+  }
+}
+
 function compareYmdAsc(a: string | null | undefined, b: string | null | undefined): number {
   const aa = a?.trim() ?? ''
   const bb = b?.trim() ?? ''
@@ -54,10 +82,6 @@ function compareYmdDesc(a: string | null | undefined, b: string | null | undefin
   return compareYmdAsc(b, a)
 }
 
-function ongoingSortKey(event: AdminEvent): string {
-  return event.end_date?.trim() || event.start_date?.trim() || '9999-99-99'
-}
-
 function endedSortKey(event: AdminEvent): string {
   return event.end_date?.trim() || event.start_date?.trim() || ''
 }
@@ -69,7 +93,7 @@ function compareWithinGroup(
 ): number {
   switch (group) {
     case 'ongoing':
-      return compareYmdAsc(ongoingSortKey(a), ongoingSortKey(b))
+      return compareYmdDesc(a.start_date, b.start_date)
     case 'upcoming':
       return compareYmdAsc(a.start_date, b.start_date)
     case 'unknown':
@@ -81,14 +105,14 @@ function compareWithinGroup(
   }
 }
 
-/** All / Published / Hidden 向け: 開催中 → これから → 日付不明 → 終了 */
+/** All / Published / Hidden 向け: これから → 開催中 → 日付不明 → 終了 */
 export function sortAdminEventsOperational(
   events: AdminEvent[],
   today: string = tokyoTodayYmd(),
 ): AdminEvent[] {
   return [...events].sort((a, b) => {
-    const ga = getAdminEventScheduleGroup(a, today)
-    const gb = getAdminEventScheduleGroup(b, today)
+    const ga = classifyAdminEventTiming(a, today)
+    const gb = classifyAdminEventTiming(b, today)
     if (ga !== gb) return GROUP_RANK[ga] - GROUP_RANK[gb]
     return compareWithinGroup(a, b, ga)
   })
