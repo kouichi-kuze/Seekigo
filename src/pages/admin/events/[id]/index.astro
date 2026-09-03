@@ -1,8 +1,10 @@
 ---
 import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import FieldReviewCards from '../../../../components/admin/FieldReviewCards.astro'
 import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
 import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
 import { ADMIN_EVENT_SELECT, type AdminEvent } from '../../../../lib/admin/types'
+import { fetchAdminFieldReviews } from '../../../../lib/admin/field-reviews'
 import { IMAGE_USAGE_STATUSES } from '../../../../lib/event-image-usage'
 import { isBodyProtectedFromSync } from '../../../../lib/event-status'
 import { getAdminEventEditStaticPaths } from '../../../../lib/admin/event-edit-paths'
@@ -26,16 +28,26 @@ const { createAdminClient } = await import('../../../../lib/supabase-admin')
 const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
 
 let event: AdminEvent | null = null
+let pendingFieldReviews: import('../../../../lib/admin/field-review-display').AdminFieldReviewRow[] = []
 let loadError: string | null = null
 let message: string | null = null
 let errorMessage: string | null = Astro.url.searchParams.get('error')
 
-if (Astro.url.searchParams.get('saved') === '1') {
+const sp = Astro.url.searchParams
+if (sp.get('saved') === '1') {
   message = '保存しました'
-} else if (Astro.url.searchParams.get('hidden') === '1') {
+} else if (sp.get('hidden') === '1') {
   message = '非表示（hidden）にしました'
-} else if (Astro.url.searchParams.get('unhidden') === '1') {
+} else if (sp.get('unhidden') === '1') {
   message = '再公開（published）しました'
+} else if (sp.get('field') === 'accepted') {
+  message = `差分を承認しました (field=${sp.get('fname') ?? '?'})`
+} else if (sp.get('field') === 'rejected') {
+  message = '差分を却下しました'
+} else if (sp.get('field') === 'accepted_bulk') {
+  message = `差分を一括承認しました (${sp.get('count') ?? '?'}件)`
+} else if (sp.get('field') === 'rejected_bulk') {
+  message = `差分を一括却下しました (${sp.get('count') ?? '?'}件)`
 }
 
 try {
@@ -48,6 +60,12 @@ try {
   if (error) throw error
   event = (data as AdminEvent | null) ?? null
   if (!event) loadError = `Event id=${eventId} not found`
+  else {
+    pendingFieldReviews = await fetchAdminFieldReviews(admin, {
+      status: 'pending',
+      eventId,
+    })
+  }
 } catch (e) {
   loadError = e instanceof Error ? e.message : String(e)
 }
@@ -108,6 +126,25 @@ const isHidden = event?.status === 'hidden'
             </p>
           )}
         </div>
+
+        {
+          pendingFieldReviews.length > 0 && (
+            <section class="admin-panel field-review-section">
+              <h2>差分レビュー {pendingFieldReviews.length}件</h2>
+              <p class="hint">
+                import 由来の変更候補です。承認すると published イベント本体が更新されます。
+                <a href="/admin/events/reviews/field/pending/">Field Reviews 一覧</a>
+              </p>
+              <FieldReviewCards
+                reviews={pendingFieldReviews}
+                csrfToken={csrfToken}
+                returnTo={`/admin/events/${eventId}/`}
+                showBulkActions={true}
+                showEventHeader={false}
+              />
+            </section>
+          )
+        }
 
         <form
           class="admin-panel edit-form"
@@ -306,6 +343,10 @@ const isHidden = event?.status === 'hidden'
   }
 
   .inline-form button {
+    margin-top: 0;
+  }
+
+  .field-review-section h2 {
     margin-top: 0;
   }
 </style>

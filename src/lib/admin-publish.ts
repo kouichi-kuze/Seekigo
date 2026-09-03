@@ -45,7 +45,12 @@ export async function processAdminPublishPost(opts: {
     return processAdminImageUsagePost({ request, url, cookies, form })
   }
 
-  if (intent === 'field_accept' || intent === 'field_reject') {
+  if (
+    intent === 'field_accept' ||
+    intent === 'field_reject' ||
+    intent === 'field_accept_bulk' ||
+    intent === 'field_reject_bulk'
+  ) {
     return processAdminFieldReviewPost({ request, url, cookies, form })
   }
 

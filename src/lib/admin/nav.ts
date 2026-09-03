@@ -30,7 +30,7 @@ export const ADMIN_NAV: AdminNavSection[] = [
     items: [
       {
         label: 'Field Reviews',
-        href: '/admin/events/reviews/field/',
+        href: '/admin/events/reviews/field/pending/',
         matchPrefix: '/admin/events/reviews/field',
       },
       {

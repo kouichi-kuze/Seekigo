@@ -1,0 +1,155 @@
+---
+import AdminLayout from '../../../../../../layouts/AdminLayout.astro'
+import FieldReviewCards from '../../../../../../components/admin/FieldReviewCards.astro'
+import { adminDevNotFoundResponse } from '../../../../../../lib/admin/dev-guard'
+import { getOrCreateAdminCsrfToken } from '../../../../../../lib/admin-security'
+import {
+  FIELD_REVIEW_STATUS_FILTERS,
+  groupFieldReviewsByEvent,
+  parseFieldReviewStatusFilter,
+  type FieldReviewStatusFilter,
+} from '../../../../../../lib/admin/field-review-display'
+import { fetchAdminFieldReviews } from '../../../../../../lib/admin/field-reviews'
+
+export function getStaticPaths() {
+  if (!import.meta.env.DEV) return []
+  return FIELD_REVIEW_STATUS_FILTERS.map((status) => ({
+    params: { status },
+  }))
+}
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const statusParam = Astro.params.status ?? 'pending'
+const statusFilter = parseFieldReviewStatusFilter(statusParam)
+if (statusFilter !== statusParam) {
+  return Astro.redirect('/admin/events/reviews/field/pending/')
+}
+
+const { createAdminClient } = await import('../../../../../../lib/supabase-admin')
+const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+
+let fieldReviews: import('../../../../../../lib/admin/field-review-display').AdminFieldReviewRow[] = []
+let loadError: string | null = null
+let message: string | null = null
+
+const sp = Astro.url.searchParams
+const fieldResult = sp.get('field')
+if (fieldResult === 'accepted') {
+  message = `承認して反映しました (review_id=${sp.get('review_id') ?? '?'}, field=${sp.get('fname') ?? '?'})`
+} else if (fieldResult === 'rejected') {
+  message = `却下しました (review_id=${sp.get('review_id') ?? '?'})`
+} else if (fieldResult === 'accepted_bulk') {
+  message = `一括承認しました (event_id=${sp.get('event_id') ?? '?'}, ${sp.get('count') ?? '?'}件)`
+} else if (fieldResult === 'rejected_bulk') {
+  message = `一括却下しました (event_id=${sp.get('event_id') ?? '?'}, ${sp.get('count') ?? '?'}件)`
+}
+
+try {
+  fieldReviews = await fetchAdminFieldReviews(createAdminClient(), {
+    status: statusFilter,
+  })
+} catch (e) {
+  loadError = e instanceof Error ? e.message : String(e)
+}
+
+const grouped = groupFieldReviewsByEvent(fieldReviews)
+const eventGroups = [...grouped.entries()].sort((a, b) => {
+  const aTitle = a[1][0]?.event_title ?? ''
+  const bTitle = b[1][0]?.event_title ?? ''
+  return aTitle.localeCompare(bTitle, 'ja')
+})
+
+function filterHref(next: FieldReviewStatusFilter): string {
+  return `/admin/events/reviews/field/${next}/`
+}
+
+const returnTo = `/admin/events/reviews/field/${statusFilter}/`
+---
+
+<AdminLayout title="Field Reviews" csrfToken={csrfToken}>
+  <h1>Field Reviews</h1>
+  <p class="hint">
+    published exact 時のフィールド差分。sync は本体を変更しません。承認時のみ events を更新します。
+  </p>
+
+  <nav class="status-filters" aria-label="Review status filter">
+    {
+      FIELD_REVIEW_STATUS_FILTERS.map((s) => (
+        <a
+          href={filterHref(s)}
+          class:list={['status-filter', statusFilter === s && 'status-filter--active']}
+        >
+          {s === 'pending' ? 'Pending' : s === 'accepted' ? 'Approved' : 'Rejected'}
+        </a>
+      ))
+    }
+  </nav>
+
+  {message && <p class="ok">{message}</p>}
+  {loadError && <p class="err">{loadError}</p>}
+
+  {
+    fieldReviews.length === 0 && !loadError && (
+      <p class="hint">
+        {statusFilter === 'pending'
+          ? '現在、pending の変更候補はありません。'
+          : `${statusFilter} の review はありません。`}
+      </p>
+    )
+  }
+
+  <div class="field-review-page">
+    {
+      eventGroups.map(([eventId, reviews]) => (
+        <section class="field-review-event-section">
+          <FieldReviewCards
+            reviews={reviews}
+            csrfToken={csrfToken}
+            returnTo={returnTo}
+            showBulkActions={statusFilter === 'pending'}
+            showEventHeader={true}
+          />
+        </section>
+      ))
+    }
+  </div>
+</AdminLayout>
+
+<style>
+  .status-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.75rem 0 1rem;
+  }
+
+  .status-filter {
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    text-decoration: none;
+    color: #334155;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .status-filter--active {
+    background: #0b6bcb;
+    border-color: #0b6bcb;
+    color: #fff;
+  }
+
+  .field-review-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .field-review-event-section {
+    border-top: 1px solid #e2e8f0;
+    padding-top: 1rem;
+  }
+</style>

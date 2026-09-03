@@ -1,0 +1,473 @@
+---
+import { formatFieldValueForDisplay, isReviewableFieldName } from '../../lib/event-field-review'
+import {
+  fieldReviewFieldLabel,
+  fieldReviewStatusLabel,
+  formatReviewTimestamp,
+  getFieldReviewWarnings,
+  isCategoryReplacementWarning,
+  type AdminFieldReviewRow,
+} from '../../lib/admin/field-review-display'
+
+interface Props {
+  reviews: AdminFieldReviewRow[]
+  csrfToken: string
+  returnTo?: string
+  showBulkActions?: boolean
+  showEventHeader?: boolean
+}
+
+const {
+  reviews,
+  csrfToken,
+  returnTo = '',
+  showBulkActions = true,
+  showEventHeader = true,
+} = Astro.props
+
+const pendingReviews = reviews.filter((r) => r.status === 'pending')
+const pendingReviewable = pendingReviews.filter((r) =>
+  isReviewableFieldName(r.field_name),
+)
+const isPendingOnly = pendingReviews.length === reviews.length && pendingReviews.length > 0
+const eventId = reviews[0]?.event_id
+const eventTitle = reviews[0]?.event_title
+const eventSlug = reviews[0]?.event_slug
+
+function bulkWarnings(rows: AdminFieldReviewRow[]): string[] {
+  const msgs = new Set<string>()
+  for (const r of rows) {
+    for (const w of getFieldReviewWarnings(r.field_name, r.current_value, r.proposed_value)) {
+      msgs.add(w)
+    }
+  }
+  return [...msgs]
+}
+
+const bulkWarnList = isPendingOnly ? bulkWarnings(pendingReviewable) : []
+---
+
+{
+  reviews.length === 0 ? (
+    <p class="hint">該当する field review はありません。</p>
+  ) : (
+    <div class="field-review-group">
+      {
+        showEventHeader && eventId != null && (
+          <header class="field-review-group__header">
+            <div>
+              <h2 class="field-review-group__title">
+                {eventTitle ?? `Event #${eventId}`}
+              </h2>
+              <p class="field-review-group__meta">
+                event id: {eventId}
+                {eventSlug && (
+                  <>
+                    {' · '}
+                    <a href={`/tokyo/event/${eventSlug}/`} target="_blank" rel="noopener">
+                      公開 ↗
+                    </a>
+                  </>
+                )}
+                {' · '}
+                <a href={`/admin/events/${eventId}/`}>編集</a>
+              </p>
+            </div>
+            {
+              showBulkActions && isPendingOnly && pendingReviewable.length > 1 && (
+                <div class="field-review-bulk">
+                  <details class="field-review-bulk__confirm">
+                    <summary>このイベントの差分をすべて承認（{pendingReviewable.length}件）</summary>
+                    <div class="field-review-bulk__body">
+                      {bulkWarnList.length > 0 && (
+                        <ul class="field-review-warn-list">
+                          {bulkWarnList.map((w) => (
+                            <li>{w}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <table class="admin-table admin-table--compact">
+                        <thead>
+                          <tr>
+                            <th>field</th>
+                            <th>現在値</th>
+                            <th>提案値</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pendingReviewable.map((r) => (
+                            <tr>
+                              <td>{fieldReviewFieldLabel(r.field_name)}</td>
+                              <td>
+                                <code>{formatFieldValueForDisplay(r.current_value)}</code>
+                              </td>
+                              <td>
+                                <code>{formatFieldValueForDisplay(r.proposed_value)}</code>
+                                {r.field_name === 'category' &&
+                                  isCategoryReplacementWarning(
+                                    r.current_value,
+                                    r.proposed_value,
+                                  ) && (
+                                    <span class="field-review-tag field-review-tag--replace">
+                                      置換
+                                    </span>
+                                  )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <form method="POST" action="/admin/events/" class="field-review-bulk__form">
+                        <input type="hidden" name="csrf_token" value={csrfToken} />
+                        <input type="hidden" name="intent" value="field_accept_bulk" />
+                        <input type="hidden" name="event_id" value={String(eventId)} />
+                        <input type="hidden" name="confirm_bulk" value="1" />
+                        {returnTo && (
+                          <input type="hidden" name="return_to" value={returnTo} />
+                        )}
+                        <label class="field-review-bulk__ack">
+                          <input type="checkbox" required name="ack_bulk" value="1" />
+                          上記の差分を確認しました
+                        </label>
+                        <button type="submit" class="btn-accept">すべて承認して反映</button>
+                      </form>
+                    </div>
+                  </details>
+                  <form method="POST" action="/admin/events/" class="inline-form">
+                    <input type="hidden" name="csrf_token" value={csrfToken} />
+                    <input type="hidden" name="intent" value="field_reject_bulk" />
+                    <input type="hidden" name="event_id" value={String(eventId)} />
+                    <input type="hidden" name="confirm_bulk" value="1" />
+                    {returnTo && (
+                      <input type="hidden" name="return_to" value={returnTo} />
+                    )}
+                    <button
+                      type="submit"
+                      class="btn-reject"
+                      onclick="return confirm('このイベントの pending 差分をすべて却下します。よろしいですか？');"
+                    >
+                      すべて却下
+                    </button>
+                  </form>
+                </div>
+              )
+            }
+          </header>
+        )
+      }
+
+      <div class="field-review-list">
+        {
+          reviews.map((fr) => {
+            const warnings = getFieldReviewWarnings(
+              fr.field_name,
+              fr.current_value,
+              fr.proposed_value,
+            )
+            const canAct =
+              fr.status === 'pending' && isReviewableFieldName(fr.field_name)
+            const categoryReplace =
+              fr.field_name === 'category' &&
+              isCategoryReplacementWarning(fr.current_value, fr.proposed_value)
+
+            return (
+              <article class="field-review-card admin-panel">
+                <div class="field-review-meta">
+                  <span class="badge">{fieldReviewFieldLabel(fr.field_name)}</span>
+                  <span class="status-pill">{fieldReviewStatusLabel(fr.status)}</span>
+                  <span>source: {fr.source_name}</span>
+                  {!showEventHeader && (
+                    <span>
+                      <a href={`/admin/events/${fr.event_id}/`}>event #{fr.event_id}</a>
+                    </span>
+                  )}
+                  {fr.source_url && (
+                    <a href={fr.source_url} target="_blank" rel="noopener">
+                      source ↗
+                    </a>
+                  )}
+                </div>
+                {!showEventHeader && (
+                  <h3>{fr.event_title ?? `(event ${fr.event_id})`}</h3>
+                )}
+                <dl class="field-review-dl">
+                  <div>
+                    <dt>created_at</dt>
+                    <dd>{formatReviewTimestamp(fr.created_at)}</dd>
+                  </div>
+                  {fr.decided_at && (
+                    <div>
+                      <dt>decided_at</dt>
+                      <dd>{formatReviewTimestamp(fr.decided_at)}</dd>
+                    </div>
+                  )}
+                  {fr.reason && (
+                    <div>
+                      <dt>reason</dt>
+                      <dd>{fr.reason}</dd>
+                    </div>
+                  )}
+                </dl>
+                {warnings.length > 0 && (
+                  <ul class="field-review-warn-list">
+                    {warnings.map((w) => (
+                      <li>{w}</li>
+                    ))}
+                  </ul>
+                )}
+                <div class="field-diff">
+                  <div class="field-diff__col field-diff__col--current">
+                    <h4>現在値</h4>
+                    <pre>{formatFieldValueForDisplay(fr.current_value)}</pre>
+                  </div>
+                  <div class="field-diff__arrow" aria-hidden="true">→</div>
+                  <div class="field-diff__col field-diff__col--proposed">
+                    <h4>提案値</h4>
+                    <pre>{formatFieldValueForDisplay(fr.proposed_value)}</pre>
+                    {categoryReplace && (
+                      <span class="field-review-tag field-review-tag--replace">category 置換</span>
+                    )}
+                  </div>
+                </div>
+                {
+                  canAct && (
+                    <div class="actions">
+                      <form method="POST" action="/admin/events/">
+                        <input type="hidden" name="csrf_token" value={csrfToken} />
+                        <input type="hidden" name="intent" value="field_accept" />
+                        <input type="hidden" name="review_id" value={String(fr.id)} />
+                        {returnTo && (
+                          <input type="hidden" name="return_to" value={returnTo} />
+                        )}
+                        <button type="submit" class="btn-accept">承認して反映</button>
+                      </form>
+                      <form method="POST" action="/admin/events/">
+                        <input type="hidden" name="csrf_token" value={csrfToken} />
+                        <input type="hidden" name="intent" value="field_reject" />
+                        <input type="hidden" name="review_id" value={String(fr.id)} />
+                        {returnTo && (
+                          <input type="hidden" name="return_to" value={returnTo} />
+                        )}
+                        <button type="submit" class="btn-reject">却下</button>
+                      </form>
+                    </div>
+                  )
+                }
+                {!canAct && fr.status !== 'pending' && (
+                  <p class="hint">処理済みの review です（再操作不可）。</p>
+                )}
+                {fr.status === 'pending' && !isReviewableFieldName(fr.field_name) && (
+                  <p class="err">許可されていない field_name のため操作できません: {fr.field_name}</p>
+                )}
+              </article>
+            )
+          })
+        }
+      </div>
+    </div>
+  )
+}
+
+<style>
+  .field-review-group__header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    align-items: flex-start;
+  }
+
+  .field-review-group__title {
+    margin: 0 0 0.25rem;
+    font-size: 1.15rem;
+  }
+
+  .field-review-group__meta {
+    margin: 0;
+    color: #555;
+    font-size: 0.9rem;
+  }
+
+  .field-review-bulk {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .field-review-bulk__confirm {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 0.35rem 0.65rem;
+    background: #f8fafc;
+    max-width: 100%;
+  }
+
+  .field-review-bulk__body {
+    margin-top: 0.75rem;
+    min-width: min(100%, 520px);
+  }
+
+  .field-review-bulk__form {
+    margin-top: 0.75rem;
+  }
+
+  .field-review-bulk__ack {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .field-review-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .field-review-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+    color: #555;
+    align-items: center;
+  }
+
+  .badge {
+    background: #e8f1ff;
+    color: #0b6bcb;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 700;
+  }
+
+  .status-pill {
+    background: #f1f5f9;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .field-review-dl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+  }
+
+  .field-review-dl dt {
+    font-weight: 700;
+    color: #666;
+    margin: 0;
+  }
+
+  .field-review-dl dd {
+    margin: 0.1rem 0 0;
+  }
+
+  .field-review-warn-list {
+    margin: 0.5rem 0;
+    padding-left: 1.25rem;
+    color: #9a3412;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem 0.5rem 2rem;
+    font-size: 0.9rem;
+  }
+
+  .field-diff {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.75rem;
+    margin: 0.75rem 0;
+    align-items: start;
+  }
+
+  .field-diff__col h4 {
+    margin: 0 0 0.35rem;
+    font-size: 0.85rem;
+    color: #666;
+  }
+
+  .field-diff__arrow {
+    padding-top: 1.75rem;
+    font-size: 1.25rem;
+    color: #888;
+  }
+
+  pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f8fafc;
+    padding: 0.5rem;
+    border: 1px solid #e2e8f0;
+    font-size: 0.85rem;
+    margin: 0;
+  }
+
+  .field-diff__col--proposed pre {
+    border-color: #93c5fd;
+    background: #eff6ff;
+  }
+
+  .field-review-tag {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  .field-review-tag--replace {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .btn-accept {
+    background: #0a7a32;
+    color: #fff;
+    border: none;
+    padding: 0.45rem 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .btn-reject {
+    background: #fff;
+    color: #a40000;
+    border: 1px solid #e88;
+    padding: 0.45rem 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .inline-form {
+    display: inline;
+  }
+
+  @media (max-width: 700px) {
+    .field-diff {
+      grid-template-columns: 1fr;
+    }
+
+    .field-diff__arrow {
+      padding-top: 0;
+      text-align: center;
+    }
+  }
+</style>
