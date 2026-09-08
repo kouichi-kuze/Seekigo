@@ -1,0 +1,107 @@
+---
+/**
+ * DEV-only: 公開「みんなの反応」UI の fixture プレビュー。
+ * 本番DBの status は変更しない。SSG production では 404。
+ */
+import Layout from '../../layouts/Layout.astro'
+import EventReactionSummary from '../../components/EventReactionSummary.astro'
+import type { EventReactionSummaryRow } from '../../lib/event-reaction-summary'
+import { adminDevNotFoundResponse } from '../../lib/admin/dev-guard'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+/** event #42 相当の published 表示確認用（fixture・DB非依存） */
+const fixtureSummary: EventReactionSummaryRow = {
+  id: 0,
+  event_id: 42,
+  summary_bullets: [
+    'イベントを楽しめたという投稿があります。',
+    '室内で写真をたくさん撮ったという投稿があります。',
+    '雨天にも関わらず、楽しめたという声が複数見られます。',
+  ],
+  signals: {
+    crowd_level: null,
+    family: null,
+    date: null,
+    solo: null,
+    photo: null,
+    rain: null,
+    wait_time: null,
+    recommended_time: null,
+  },
+  source_count: 6,
+  confidence: 'medium',
+  status: 'published',
+  generated_at: new Date().toISOString(),
+  reviewed_at: null,
+  reviewed_by: null,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+}
+
+const fixtureWithTags: EventReactionSummaryRow = {
+  ...fixtureSummary,
+  id: 1,
+  signals: {
+    crowd_level: 'medium',
+    family: true,
+    date: null,
+    solo: true,
+    photo: true,
+    rain: true,
+    wait_time: 'short',
+    recommended_time: '平日の午前中',
+  },
+}
+---
+
+<Layout title="反応UIプレビュー（DEV） | Seekigo">
+  <main class="preview">
+    <h1>みんなの反応 UI プレビュー（DEV）</h1>
+    <p class="hint">
+      event #42 相当 fixture。本番DBは変更しません。source 本文は含めません。
+    </p>
+
+    <h2 class="sub">A. source_count=6 / unknown signals</h2>
+    <div class="frame">
+      <EventReactionSummary summary={fixtureSummary} />
+    </div>
+
+    <h2 class="sub">B. tags + recommended_time あり</h2>
+    <div class="frame">
+      <EventReactionSummary summary={fixtureWithTags} />
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .preview {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+
+  h1 {
+    font-size: 20px;
+    color: var(--c-navy, #0e2744);
+    margin: 0 0 8px;
+  }
+
+  .hint {
+    margin: 0 0 24px;
+    font-size: 13px;
+    color: var(--c-muted, #64748b);
+  }
+
+  .sub {
+    margin: 28px 0 10px;
+    font-size: 14px;
+    color: var(--c-navy, #0e2744);
+  }
+
+  .frame {
+    max-width: 560px;
+  }
+</style>

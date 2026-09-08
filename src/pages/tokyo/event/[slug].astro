@@ -162,6 +162,8 @@ const reactionSummary = event
           </section>
         )}
 
+        {reactionSummary && <EventReactionSummary summary={reactionSummary} />}
+
         {event.official_url && (
           <div class="event-cta">
             <a
@@ -187,8 +189,6 @@ const reactionSummary = event
             </a>
           </p>
         )}
-
-        {reactionSummary && <EventReactionSummary summary={reactionSummary} />}
 
         <section class="organizer-note" aria-labelledby="organizer-note-heading">
           <h2 id="organizer-note-heading" class="organizer-note__heading">

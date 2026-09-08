@@ -1,8 +1,8 @@
 /**
- * Phase 4A: SNS・Web 反応要約（公開表示・型・AI schema 案）。
+ * Phase 4A / 4B-3: SNS・Web 反応要約（公開表示・型・AI 入出力）。
  * - 第三者投稿の大量転載はしない
  * - 公開は status=published のみ
- * - AI は未接続（将来の入出力契約のみ定義）
+ * - AI 生成は draft。自動 Publish しない
  */
 
 export const REACTION_SUMMARY_STATUSES = [
@@ -84,20 +84,50 @@ export const REACTION_SIGNAL_TAGS: {
 }[] = [
   {
     key: 'crowd_level',
-    label: '混雑',
-    when: (s) => s.crowd_level === 'high' || s.crowd_level === 'medium',
+    label: '混雑傾向',
+    when: (s) => s.crowd_level === 'high',
+  },
+  {
+    key: 'crowd_level',
+    label: 'やや混雑',
+    when: (s) => s.crowd_level === 'medium',
+  },
+  {
+    key: 'crowd_level',
+    label: '比較的ゆったり',
+    when: (s) => s.crowd_level === 'low',
   },
   { key: 'family', label: '子ども向け', when: (s) => s.family === true },
   { key: 'date', label: 'デート', when: (s) => s.date === true },
-  { key: 'solo', label: '一人向け', when: (s) => s.solo === true },
-  { key: 'photo', label: '写真映え', when: (s) => s.photo === true },
+  { key: 'solo', label: '一人でも', when: (s) => s.solo === true },
+  { key: 'photo', label: '写真', when: (s) => s.photo === true },
   { key: 'rain', label: '雨の日', when: (s) => s.rain === true },
   {
     key: 'wait_time',
-    label: '待ち時間',
-    when: (s) => s.wait_time === 'long' || s.wait_time === 'medium',
+    label: '待ち時間長め',
+    when: (s) => s.wait_time === 'long',
+  },
+  {
+    key: 'wait_time',
+    label: '待ち時間あり',
+    when: (s) => s.wait_time === 'medium',
+  },
+  {
+    key: 'wait_time',
+    label: '待ち時間短め',
+    when: (s) => s.wait_time === 'short',
   },
 ]
+
+/** Public UI tags — unknown/null/false and mixed are never shown. */
+export function publicReactionSignalLabels(signals: ReactionSignals): string[] {
+  return REACTION_SIGNAL_TAGS.filter((t) => t.when(signals)).map((t) => t.label)
+}
+
+/** @deprecated use publicReactionSignalLabels */
+export function activeReactionSignalLabels(signals: ReactionSignals): string[] {
+  return publicReactionSignalLabels(signals)
+}
 
 export function parseSummaryBullets(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -147,10 +177,6 @@ export function formatReactionUpdatedAt(iso: string | null | undefined): string 
   if (Number.isNaN(d.getTime())) return ''
   const y = d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
   return y.replace(/-/g, '/')
-}
-
-export function activeReactionSignalLabels(signals: ReactionSignals): string[] {
-  return REACTION_SIGNAL_TAGS.filter((t) => t.when(signals)).map((t) => t.label)
 }
 
 export function mapSummaryRow(data: Record<string, unknown>): EventReactionSummaryRow {
@@ -215,7 +241,7 @@ export async function fetchPublishedReactionSummary(
 }
 
 /**
- * 将来の AI 要約入出力契約（Phase 4A では実行しない）。
+ * AI 要約入出力契約（Phase 4B-3 で実行）。
  *
  * 絶対ルール:
  * - source にない内容を推測しない
@@ -232,14 +258,14 @@ export type ReactionSummaryAiInput = {
     end_date?: string | null
     venue?: string | null
     area?: string | null
+    category?: string[] | null
   }
   sources: Array<{
     source_type: ReactionSourceType
-    source_url?: string | null
-    source_name?: string | null
     observed_at?: string | null
     /** 内部処理用の短い抜粋。公開転載禁止 */
     text_for_analysis: string
+    classification?: 'experience' | 'official' | 'media' | 'other'
   }>
   locale: 'ja'
   max_bullets: number
@@ -254,8 +280,8 @@ export type ReactionSummaryAiOutput = {
 }
 
 /**
- * Phase 4B-1: event_reaction_sources → AI input 変換のみ（実行しない）。
- * text_for_analysis は excerpt のみ。推測補完しない。
+ * event_reaction_sources → AI input（必要最小限）。
+ * author / URL / プロフィールは渡さない。excerpt のみ。
  */
 export function toReactionSummaryAiInput(opts: {
   event: ReactionSummaryAiInput['event']
@@ -265,6 +291,7 @@ export function toReactionSummaryAiInput(opts: {
     source_name?: string | null
     observed_at?: string | null
     excerpt_for_internal_review?: string | null
+    classification?: 'experience' | 'official' | 'media' | 'other'
   }>
   max_bullets?: number
 }): ReactionSummaryAiInput {
@@ -279,16 +306,24 @@ export function toReactionSummaryAiInput(opts: {
         : 'other_web'
       return {
         source_type: type,
-        source_url: s.source_url ?? null,
-        source_name: s.source_name ?? null,
         observed_at: s.observed_at ?? null,
         text_for_analysis: text.slice(0, 500),
+        classification: s.classification,
       }
     })
     .filter((s): s is NonNullable<typeof s> => Boolean(s))
+    .slice(0, 20)
 
   return {
-    event: opts.event,
+    event: {
+      id: opts.event.id,
+      title: opts.event.title,
+      start_date: opts.event.start_date,
+      end_date: opts.event.end_date,
+      venue: opts.event.venue,
+      area: opts.event.area,
+      category: opts.event.category ?? null,
+    },
     sources,
     locale: 'ja',
     max_bullets: opts.max_bullets ?? 5,

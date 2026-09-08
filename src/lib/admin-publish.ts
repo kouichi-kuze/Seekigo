@@ -62,7 +62,8 @@ export async function processAdminPublishPost(opts: {
   if (
     intent === 'reaction_save' ||
     intent === 'reaction_publish' ||
-    intent === 'reaction_hide'
+    intent === 'reaction_hide' ||
+    intent === 'reaction_ai_generate'
   ) {
     return processAdminReactionSummaryPost({ request, url, cookies, form })
   }

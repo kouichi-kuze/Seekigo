@@ -274,7 +274,49 @@ Publish
 | `npm run import:enjoytokyo` | EnjoyTokyo import |
 | `npm run enrich:enjoytokyo:ai` | EnjoyTokyo AI enrichment |
 | `npm run import:walkerplus` | Walkerplus 手動 import |
+| `npm run collect:reaction-web` | Web/RSS 反応ソース収集（PoC） |
+| `npm run collect:reaction-x` | X Recent Search 反応ソース収集（PoC） |
+| `npm run summarize:reaction` | SNS・Web 反応の AI 要約（draft・PoC） |
 | `npm run brand:export` | brand / OGP PNG 書き出し（任意・build 非連動） |
+
+### X 反応収集（Phase 4B-2 PoC）
+
+```powershell
+# .env に X_BEARER_TOKEN=... （PUBLIC_ 禁止・commit 禁止）
+$env:REACTION_EVENT_ID="2"
+$env:DRY_RUN="true"
+$env:X_MAX_RESULTS="10"
+npm run collect:reaction-x
+```
+
+- Endpoint: `GET https://api.x.com/2/tweets/search/recent`（公式のみ）
+- 既定は DRY_RUN（DB 非書き込み）。Post 全文の公開転載はしない
+- PoC の Post read 単価はコード内 `X_POST_READ_COST_USD`（現状 $0.005）。**X の料金は変更される可能性があるため公式を確認**
+
+### 反応 AI 要約（Phase 4B-3 PoC）
+
+```powershell
+# .env に OPENAI_API_KEY=... （PUBLIC_ 禁止・commit 禁止）
+# 1) input 確認のみ（API なし）
+$env:REACTION_EVENT_ID="42"
+$env:DRY_RUN="true"
+$env:AI_DRY_RUN_NO_API="true"
+npm run summarize:reaction
+
+# 2) OpenAI 1回・DB 非書き込み
+$env:AI_DRY_RUN_NO_API="false"
+$env:DRY_RUN="true"
+npm run summarize:reaction
+
+# 3) draft へ保存（確認後）
+$env:DRY_RUN="false"
+npm run summarize:reaction
+```
+
+- 既定モデル: `gpt-4.1-nano`（`OPENAI_REACTION_MODEL` で上書き可）
+- 生成後は `status=draft`。**自動 Publish しない**
+- 公開ページは `published` かつ bullets があるときのみ表示
+- **AI 料金は変更される可能性があるため、[OpenAI Platform Usage](https://platform.openai.com/usage) で実費を確認**
 
 ### GO TOKYO
 

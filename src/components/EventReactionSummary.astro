@@ -1,12 +1,12 @@
 ---
 /**
- * 公開イベント詳細: SNS・Web 反応要約（published のみ）。
- * 第三者投稿本文は表示しない。
+ * 公開イベント詳細: 「みんなの反応」（published + bullets のみ）。
+ * X投稿本文 / excerpt / username / source_url は一切表示しない。
  */
 import type { EventReactionSummaryRow } from '../lib/event-reaction-summary'
 import {
-  activeReactionSignalLabels,
   formatReactionUpdatedAt,
+  publicReactionSignalLabels,
 } from '../lib/event-reaction-summary'
 
 interface Props {
@@ -14,74 +14,112 @@ interface Props {
 }
 
 const { summary } = Astro.props
-const tags = activeReactionSignalLabels(summary.signals)
+
+const bullets = (summary.summary_bullets ?? [])
+  .map((b) => String(b ?? '').trim())
+  .filter(Boolean)
+  .slice(0, 5)
+
+const showSection = bullets.length > 0
+const tags = publicReactionSignalLabels(summary.signals)
+const recommended = summary.signals.recommended_time?.trim() || null
+const showLowSourceNote = summary.source_count > 0 && summary.source_count < 10
 const updatedLabel = formatReactionUpdatedAt(
   summary.reviewed_at ?? summary.generated_at ?? summary.updated_at,
 )
-const recommended = summary.signals.recommended_time?.trim() || null
 ---
 
-<section class="reaction-summary" aria-labelledby="reaction-summary-heading">
-  <h2 id="reaction-summary-heading" class="reaction-summary__heading">
-    SNS・Web上の反応
-  </h2>
-  <p class="reaction-summary__note">
-    公開情報から見える傾向の要約です。個人の投稿を転載したものではありません。
-  </p>
+{
+  showSection && (
+    <section class="reaction-summary" aria-labelledby="reaction-summary-heading">
+      <header class="reaction-summary__header">
+        <h2 id="reaction-summary-heading" class="reaction-summary__heading">
+          みんなの反応
+        </h2>
+        <p class="reaction-summary__kicker">SNS・Web上の公開情報から</p>
+      </header>
 
-  {
-    tags.length > 0 && (
-      <ul class="reaction-summary__tags" aria-label="反応の傾向タグ">
-        {tags.map((label) => (
-          <li>{label}</li>
+      {
+        tags.length > 0 && (
+          <ul class="reaction-summary__tags" aria-label="反応から見える傾向">
+            {tags.map((label) => (
+              <li>
+                <span class="reaction-summary__tag">{label}</span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+
+      <ul class="reaction-summary__list">
+        {bullets.map((bullet) => (
+          <li>{bullet}</li>
         ))}
       </ul>
-    )
-  }
 
-  <ul class="reaction-summary__list">
-    {
-      summary.summary_bullets.map((bullet) => (
-        <li>{bullet}</li>
-      ))
-    }
-  </ul>
+      {
+        recommended && (
+          <p class="reaction-summary__time">
+            <span class="reaction-summary__time-label">おすすめの時間帯</span>
+            <span class="reaction-summary__time-value">{recommended}</span>
+          </p>
+        )
+      }
 
-  {
-    recommended && (
-      <p class="reaction-summary__time">
-        行きやすい時間帯の傾向: {recommended}
-      </p>
-    )
-  }
-
-  {
-    updatedLabel && (
-      <p class="reaction-summary__updated">最終更新: {updatedLabel}</p>
-    )
-  }
-</section>
+      <footer class="reaction-summary__footer">
+        <p class="reaction-summary__provenance">
+          SNS・Web上の公開情報をもとに要約しています。
+        </p>
+        {
+          showLowSourceNote && (
+            <p class="reaction-summary__caution">
+              投稿数が少ないため、傾向は参考情報としてご覧ください。
+            </p>
+          )
+        }
+        {
+          updatedLabel && (
+            <p class="reaction-summary__updated">更新: {updatedLabel}</p>
+          )
+        }
+      </footer>
+    </section>
+  )
+}
 
 <style>
   .reaction-summary {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 20px 0 4px;
-    border-top: 1px solid var(--c-border);
+    gap: 14px;
+    margin: 20px 0 8px;
+    padding: 18px 16px;
+    background: #fff;
+    border: 1px solid var(--c-border, #e2e8f0);
+    border-radius: var(--r-md, 12px);
+  }
+
+  .reaction-summary__header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .reaction-summary__heading {
-    font-size: 18px;
+    margin: 0;
+    font-size: 17px;
     font-weight: 800;
-    color: var(--c-navy);
+    letter-spacing: 0.01em;
+    color: var(--c-navy, #0e2744);
+    line-height: 1.35;
   }
 
-  .reaction-summary__note {
+  .reaction-summary__kicker {
     margin: 0;
-    font-size: 13px;
-    color: var(--c-muted);
-    line-height: 1.6;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-muted, #64748b);
+    line-height: 1.4;
   }
 
   .reaction-summary__tags {
@@ -90,37 +128,89 @@ const recommended = summary.signals.recommended_time?.trim() || null
     padding: 0;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
   }
 
-  .reaction-summary__tags li {
-    font-size: 12px;
+  .reaction-summary__tag {
+    display: inline-block;
+    font-size: 11px;
     font-weight: 700;
-    color: var(--c-navy);
-    border: 1px solid var(--c-border);
-    background: var(--c-bg);
-    padding: 4px 10px;
-    border-radius: var(--r-sm);
+    line-height: 1.3;
+    color: var(--c-navy, #0e2744);
+    background: color-mix(in srgb, var(--c-cyan, #00a3ff) 12%, #fff);
+    border: 1px solid color-mix(in srgb, var(--c-cyan, #00a3ff) 28%, #e2e8f0);
+    padding: 3px 9px;
+    border-radius: 999px;
   }
 
   .reaction-summary__list {
     margin: 0;
-    padding: 0 0 0 1.1rem;
+    padding: 0 0 0 1.15rem;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
   .reaction-summary__list li {
-    font-size: 15px;
+    font-size: 14.5px;
     line-height: 1.65;
-    color: var(--c-text);
+    color: var(--c-text, #1e293b);
   }
 
-  .reaction-summary__time,
+  .reaction-summary__time {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    background: var(--c-bg, #f8fafc);
+    border-radius: var(--r-sm, 8px);
+  }
+
+  .reaction-summary__time-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--c-muted, #64748b);
+  }
+
+  .reaction-summary__time-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--c-navy, #0e2744);
+  }
+
+  .reaction-summary__footer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 2px;
+  }
+
+  .reaction-summary__provenance,
+  .reaction-summary__caution,
   .reaction-summary__updated {
     margin: 0;
-    font-size: 13px;
-    color: var(--c-muted);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--c-muted, #64748b);
+  }
+
+  .reaction-summary__caution {
+    color: color-mix(in srgb, var(--c-navy, #0e2744) 55%, #64748b);
+  }
+
+  @media (min-width: 720px) {
+    .reaction-summary {
+      padding: 20px 20px;
+      gap: 16px;
+    }
+
+    .reaction-summary__heading {
+      font-size: 18px;
+    }
+
+    .reaction-summary__list li {
+      font-size: 15px;
+    }
   }
 </style>

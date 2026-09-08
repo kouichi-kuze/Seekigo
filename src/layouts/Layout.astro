@@ -16,6 +16,9 @@ interface Props {
 
 const { title, description, noindex = false, robots, ogImage } = Astro.props
 
+/** ビルド／描画時点の西暦（毎年手更新不要） */
+const copyrightYear = new Date().getFullYear()
+
 /** pathname のみ（query は canonical / og:url に含めない） */
 const canonical = Astro.site
   ? new URL(Astro.url.pathname, Astro.site).href
@@ -77,7 +80,7 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
     <footer class="site-footer">
       <div class="inner site-footer__inner">
         <SeekigoLogo size="footer" />
-        <p class="site-footer__copy">© 2025 Seekigo</p>
+        <p class="site-footer__copy">© {copyrightYear} Seekigo</p>
       </div>
     </footer>
   </body>

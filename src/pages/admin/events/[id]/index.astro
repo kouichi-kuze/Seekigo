@@ -9,11 +9,16 @@ import { IMAGE_USAGE_STATUSES } from '../../../../lib/event-image-usage'
 import { isBodyProtectedFromSync } from '../../../../lib/event-status'
 import { getAdminEventEditStaticPaths } from '../../../../lib/admin/event-edit-paths'
 import {
+  getAdminEventScheduleGroup,
+  type AdminEventScheduleGroup,
+} from '../../../../lib/admin/event-sort'
+import {
   bulletsToTextarea,
   mapSummaryRow,
   type EventReactionSourceRow,
   type EventReactionSummaryRow,
 } from '../../../../lib/event-reaction-summary'
+import { classifyBulletTheme } from '../../../../lib/reaction-summary-quality'
 
 /** 本番 SSG では admin 編集ページを生成しない。DEV では Supabase から id 一覧を取得。 */
 export async function getStaticPaths() {
@@ -34,10 +39,12 @@ const { createAdminClient } = await import('../../../../lib/supabase-admin')
 const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
 
 let event: AdminEvent | null = null
-let pendingFieldReviews: import('../../../../lib/admin/field-review-display').AdminFieldReviewRow[] = []
+let pendingFieldReviews: import('../../../../lib/admin/field-review-display').AdminFieldReviewRow[] =
+  []
 let reactionSummary: EventReactionSummaryRow | null = null
 let reactionSources: EventReactionSourceRow[] = []
 let reactionLoadNote: string | null = null
+let eventSourceCount = 0
 let loadError: string | null = null
 let message: string | null = null
 let errorMessage: string | null = Astro.url.searchParams.get('error')
@@ -63,6 +70,8 @@ if (sp.get('saved') === '1') {
   message = 'SNS・Web反応を Publish しました'
 } else if (sp.get('reaction_hidden') === '1') {
   message = 'SNS・Web反応を Hidden にしました'
+} else if (sp.get('reaction_ai') === '1') {
+  message = 'AI要約を生成しました（status=draft・要確認）'
 }
 
 try {
@@ -80,6 +89,12 @@ try {
       status: 'pending',
       eventId,
     })
+
+    const { count: srcCount } = await admin
+      .from('event_sources')
+      .select('*', { count: 'exact', head: true })
+      .eq('event_id', eventId)
+    eventSourceCount = srcCount ?? 0
 
     const { data: reactionData, error: reactionError } = await admin
       .from('event_reaction_summaries')
@@ -138,18 +153,37 @@ function usageStatusOf(ev: AdminEvent): string {
   return ev.image_usage_status?.trim() || 'unknown'
 }
 
+function scheduleLabel(g: AdminEventScheduleGroup): string {
+  switch (g) {
+    case 'upcoming':
+      return 'これから'
+    case 'ongoing':
+      return '開催中'
+    case 'ended':
+      return '終了'
+    default:
+      return '日付不明'
+  }
+}
+
 const syncProtected = event ? isBodyProtectedFromSync(event.status) : false
 const isDraft = event?.status === 'draft'
 const isPublished = event?.status === 'published'
 const isHidden = event?.status === 'hidden'
-
+const scheduleGroup = event ? getAdminEventScheduleGroup(event) : 'unknown'
 const reactionSignals = reactionSummary?.signals ?? {}
 const reactionBulletsText = bulletsToTextarea(reactionSummary?.summary_bullets ?? [])
+const reactionBulletDebug = (reactionSummary?.summary_bullets ?? []).map((text) => ({
+  text,
+  theme: classifyBulletTheme(text),
+}))
+const reactionStatusLabel = reactionSummary?.status ?? '未作成'
+const publicHref =
+  event?.slug && isPublished ? `/tokyo/event/${event.slug}/` : null
 ---
 
 <AdminLayout title={event ? `Edit #${event.id}` : 'Edit Event'} csrfToken={csrfToken}>
-  <p><a href="/admin/events/all/">← All Events</a></p>
-  <h1>Event #{eventId}</h1>
+  <p class="crumb"><a href="/admin/events/all/">← All Events</a></p>
 
   {message && <p class="ok">{message}</p>}
   {errorMessage && <p class="err">{decodeURIComponent(errorMessage)}</p>}
@@ -158,30 +192,86 @@ const reactionBulletsText = bulletsToTextarea(reactionSummary?.summary_bullets ?
   {
     event && (
       <>
-        <div class="admin-panel">
-          <p>
-            status: <strong>{event.status}</strong>
-            {event.slug && isPublished && (
-              <>
-                {' · '}
-                <a href={`/tokyo/event/${event.slug}/`} target="_blank" rel="noopener">
+        <header class="event-header admin-panel">
+          <div class="event-header__main">
+            <p class="event-header__id">Event #{event.id}</p>
+            <h1 class="event-header__title">{event.title ?? '(no title)'}</h1>
+            <div class="event-header__meta">
+              <span class={`badge badge--event-${event.status ?? 'unknown'}`}>
+                event: {event.status}
+              </span>
+              <span class={`badge badge--schedule badge--schedule-${scheduleGroup}`}>
+                {scheduleLabel(scheduleGroup)}
+              </span>
+              <span class="meta-chip">sources {eventSourceCount}</span>
+              <span class="meta-chip">
+                field review pending {pendingFieldReviews.length}
+              </span>
+              <span class={`badge badge--reaction-${reactionSummary?.status ?? 'none'}`}>
+                reaction: {reactionStatusLabel}
+              </span>
+            </div>
+            <div class="event-header__links">
+              {publicHref ? (
+                <a href={publicHref} target="_blank" rel="noopener">
                   公開ページ ↗
                 </a>
-              </>
+              ) : (
+                <span class="hint">公開ページは published + slug 時のみ</span>
+              )}
+              {event.slug && <span class="hint">slug: {event.slug}</span>}
+            </div>
+            {isDraft && (
+              <p class="sync-warn">
+                draft は次回 sync でソース値に上書きされる可能性があります。published /
+                hidden は sync 本体非上書き（field review 経路は別）。
+              </p>
             )}
-          </p>
-          {isDraft && (
-            <p class="sync-warn">
-              draft は次回 sync でソース値に上書きされる可能性があります。published
-              / hidden は sync 本体非上書き（field review 経路は別）。
-            </p>
-          )}
-          {syncProtected && (
-            <p class="hint">
-              published / hidden — sync import は本体を上書きしません。
-            </p>
-          )}
-        </div>
+            {syncProtected && (
+              <p class="hint compact">
+                published / hidden — sync import は本体を上書きしません。
+              </p>
+            )}
+          </div>
+
+          <div class="event-header__actions">
+            <p class="action-label">イベント公開状態</p>
+            {isPublished && (
+              <form method="post" action="/admin/events/" class="inline-form">
+                <input type="hidden" name="csrf_token" value={csrfToken} />
+                <input type="hidden" name="intent" value="hide_event" />
+                <input type="hidden" name="event_id" value={String(event.id)} />
+                <button type="submit" class="btn btn--secondary">
+                  Hidden にする
+                </button>
+              </form>
+            )}
+            {isHidden && (
+              <form method="post" action="/admin/events/" class="inline-form">
+                <input type="hidden" name="csrf_token" value={csrfToken} />
+                <input type="hidden" name="intent" value="unhide_event" />
+                <input type="hidden" name="event_id" value={String(event.id)} />
+                <button type="submit" class="btn btn--primary">
+                  Published に戻す
+                </button>
+              </form>
+            )}
+            {isDraft && (
+              <p class="hint compact">
+                draft の公開は
+                <a href="/admin/events/draft/">Draft workspace</a>
+                から。
+              </p>
+            )}
+            <button
+              type="submit"
+              form="event-edit-form"
+              class="btn btn--primary btn--save"
+            >
+              基本情報を保存
+            </button>
+          </div>
+        </header>
 
         {
           pendingFieldReviews.length > 0 && (
@@ -202,371 +292,924 @@ const reactionBulletsText = bulletsToTextarea(reactionSummary?.summary_bullets ?
           )
         }
 
-        <form
-          class="admin-panel edit-form"
-          method="post"
-          action="/admin/events/"
-        >
-          <input type="hidden" name="csrf_token" value={csrfToken} />
-          <input type="hidden" name="intent" value="event_update" />
-          <input type="hidden" name="event_id" value={String(event.id)} />
-
-          <h2>基本情報</h2>
-          <label>
-            title
-            <input type="text" name="title" value={event.title ?? ''} required />
-          </label>
-          <div class="form-row">
-            <label>
-              start_date
-              <input type="date" name="start_date" value={event.start_date?.slice(0, 10) ?? ''} />
-            </label>
-            <label>
-              end_date
-              <input type="date" name="end_date" value={event.end_date?.slice(0, 10) ?? ''} />
-            </label>
-          </div>
-          <div class="form-row">
-            <label>
-              start_time (HH:MM)
-              <input type="text" name="start_time" value={fmtTime(event.start_time)} placeholder="10:00" />
-            </label>
-            <label>
-              end_time (HH:MM)
-              <input type="text" name="end_time" value={fmtTime(event.end_time)} placeholder="17:00" />
-            </label>
-          </div>
-          <label>
-            venue
-            <input type="text" name="venue" value={event.venue ?? ''} />
-          </label>
-          <label>
-            area
-            <input type="text" name="area" value={event.area ?? ''} />
-          </label>
-          <label>
-            address
-            <textarea name="address" rows="2">{event.address ?? ''}</textarea>
-          </label>
-          <label>
-            price_text
-            <input type="text" name="price_text" value={event.price_text ?? ''} />
-          </label>
-          <label>
-            category（カンマ区切り）
-            <input type="text" name="category" value={fmtCategory(event.category)} />
-          </label>
-          <label>
-            official_url
-            <input type="url" name="official_url" value={event.official_url ?? ''} />
-          </label>
-          <label>
-            summary
-            <textarea name="summary" rows="5">{event.summary ?? ''}</textarea>
-          </label>
-
-          <h2>画像</h2>
-          <label>
-            image_url
-            <input type="url" name="image_url" value={event.image_url ?? ''} />
-          </label>
-          <label>
-            image_usage_status
-            <select name="image_usage_status">
-              {IMAGE_USAGE_STATUSES.map((s) => (
-                <option value={s} selected={usageStatusOf(event) === s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            image_credit（licensed / organizer_granted 時）
-            <input type="text" name="image_credit" value={event.image_credit ?? ''} />
-          </label>
-          <input type="hidden" name="image_source" value={event.image_source ?? 'seekigo'} />
-
-          <button type="submit">保存</button>
-        </form>
-
-        <section class="admin-panel reaction-section">
-          <h2>SNS・Web反応</h2>
-          <p class="hint">
-            公開情報の傾向要約です。第三者投稿本文は公開ページに出ません。
-            AI 生成後も自動公開せず、人間確認後に Publish してください。
-          </p>
-          {reactionLoadNote && <p class="err">{reactionLoadNote}</p>}
-
-          <form method="post" action="/admin/events/" class="reaction-form">
+        <div class="admin-event-main">
+          <form
+            id="event-edit-form"
+            class="edit-form admin-panel admin-event-main__left"
+            method="post"
+            action="/admin/events/"
+          >
             <input type="hidden" name="csrf_token" value={csrfToken} />
-            <input type="hidden" name="intent" value="reaction_save" />
+            <input type="hidden" name="intent" value="event_update" />
             <input type="hidden" name="event_id" value={String(event.id)} />
+            <input type="hidden" name="image_source" value={event.image_source ?? 'seekigo'} />
 
-            <p>
-              status: <strong>{reactionSummary?.status ?? '（未作成）'}</strong>
-              {' · '}
-              confidence: <strong>{reactionSummary?.confidence ?? '—'}</strong>
-              {' · '}
-              source_count: <strong>{reactionSummary?.source_count ?? 0}</strong>
-            </p>
-            <p class="hint">
-              generated_at: {reactionSummary?.generated_at ?? '—'}
-              {' · '}
-              reviewed_at: {reactionSummary?.reviewed_at ?? '—'}
-            </p>
-
+            <h2>基本情報</h2>
             <label>
-              要約（1行1項目。断定せず「〜という反応 / 傾向」表現）
-              <textarea
-                name="summary_bullets"
-                rows="5"
-                placeholder={'・週末は混雑したという反応が多めです\n・子ども連れでも楽しめたという声があります'}
-              >{reactionBulletsText}</textarea>
+              title
+              <input type="text" name="title" value={event.title ?? ''} required />
             </label>
 
-            <fieldset class="reaction-signals">
-              <legend>signals</legend>
-              <label>
-                crowd_level
-                <select name="crowd_level">
-                  <option value="">（なし）</option>
-                  <option value="high" selected={reactionSignals.crowd_level === 'high'}>
-                    high
-                  </option>
-                  <option value="medium" selected={reactionSignals.crowd_level === 'medium'}>
-                    medium
-                  </option>
-                  <option value="low" selected={reactionSignals.crowd_level === 'low'}>
-                    low
-                  </option>
-                </select>
-              </label>
-              <label>
-                wait_time
-                <select name="wait_time">
-                  <option value="">（なし）</option>
-                  <option value="long" selected={reactionSignals.wait_time === 'long'}>
-                    long
-                  </option>
-                  <option value="medium" selected={reactionSignals.wait_time === 'medium'}>
-                    medium
-                  </option>
-                  <option value="short" selected={reactionSignals.wait_time === 'short'}>
-                    short
-                  </option>
-                </select>
-              </label>
-              <label class="check">
-                <input type="checkbox" name="signal_family" value="1" checked={reactionSignals.family === true} />
-                子ども向け (family)
-              </label>
-              <label class="check">
-                <input type="checkbox" name="signal_date" value="1" checked={reactionSignals.date === true} />
-                デート (date)
-              </label>
-              <label class="check">
-                <input type="checkbox" name="signal_solo" value="1" checked={reactionSignals.solo === true} />
-                一人向け (solo)
-              </label>
-              <label class="check">
-                <input type="checkbox" name="signal_photo" value="1" checked={reactionSignals.photo === true} />
-                写真映え (photo)
-              </label>
-              <label class="check">
-                <input type="checkbox" name="signal_rain" value="1" checked={reactionSignals.rain === true} />
-                雨の日 (rain)
-              </label>
-              <label>
-                recommended_time
-                <input
-                  type="text"
-                  name="recommended_time"
-                  value={reactionSignals.recommended_time ?? ''}
-                  placeholder="例: 夕方"
-                />
-              </label>
-            </fieldset>
-
+            <h3 class="subhead">日時</h3>
             <div class="form-row">
               <label>
-                source_count
+                start_date
                 <input
-                  type="number"
-                  name="source_count"
-                  min="0"
-                  max="999"
-                  value={String(reactionSummary?.source_count ?? 0)}
+                  type="date"
+                  name="start_date"
+                  value={event.start_date?.slice(0, 10) ?? ''}
                 />
               </label>
               <label>
-                confidence
-                <select name="confidence">
-                  <option value="low" selected={(reactionSummary?.confidence ?? 'low') === 'low'}>
-                    low
-                  </option>
-                  <option value="medium" selected={reactionSummary?.confidence === 'medium'}>
-                    medium
-                  </option>
-                  <option value="high" selected={reactionSummary?.confidence === 'high'}>
-                    high
-                  </option>
-                </select>
+                end_date
+                <input
+                  type="date"
+                  name="end_date"
+                  value={event.end_date?.slice(0, 10) ?? ''}
+                />
+              </label>
+            </div>
+            <div class="form-row">
+              <label>
+                start_time (HH:MM)
+                <input
+                  type="text"
+                  name="start_time"
+                  value={fmtTime(event.start_time)}
+                  placeholder="10:00"
+                />
+              </label>
+              <label>
+                end_time (HH:MM)
+                <input
+                  type="text"
+                  name="end_time"
+                  value={fmtTime(event.end_time)}
+                  placeholder="17:00"
+                />
               </label>
             </div>
 
-            <label class="check">
-              <input type="checkbox" name="mark_reviewed" value="1" />
-              保存時に status=reviewed にする（published は維持）
+            <h3 class="subhead">会場</h3>
+            <label>
+              venue
+              <input type="text" name="venue" value={event.venue ?? ''} />
+            </label>
+            <label>
+              area
+              <input type="text" name="area" value={event.area ?? ''} />
+            </label>
+            <label>
+              address
+              <textarea name="address" rows="2">{event.address ?? ''}</textarea>
             </label>
 
-            <button type="submit">反応要約を保存</button>
+            <h3 class="subhead">料金・カテゴリ</h3>
+            <label>
+              price_text
+              <input type="text" name="price_text" value={event.price_text ?? ''} />
+            </label>
+            <label>
+              category（カンマ区切り）
+              <input type="text" name="category" value={fmtCategory(event.category)} />
+            </label>
+            <label>
+              official_url
+              <input type="url" name="official_url" value={event.official_url ?? ''} />
+            </label>
+            <label>
+              summary
+              <textarea name="summary" rows="8">{event.summary ?? ''}</textarea>
+            </label>
+
+            <div class="form-footer">
+              <button type="submit" class="btn btn--primary">基本情報を保存</button>
+            </div>
           </form>
 
-          <div class="reaction-actions">
-            <form method="post" action="/admin/events/" class="inline-form">
+          <div class="admin-event-main__right">
+            <section class="admin-panel image-panel">
+              <h2>画像</h2>
+              <div class="image-preview">
+                {event.image_url ? (
+                  <img
+                    src={event.image_url}
+                    alt=""
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                  />
+                ) : (
+                  <p class="hint">画像未設定</p>
+                )}
+              </div>
+              <label>
+                image_url
+                <input
+                  form="event-edit-form"
+                  type="url"
+                  name="image_url"
+                  value={event.image_url ?? ''}
+                />
+              </label>
+              <label>
+                image_usage_status
+                <select form="event-edit-form" name="image_usage_status">
+                  {IMAGE_USAGE_STATUSES.map((s) => (
+                    <option value={s} selected={usageStatusOf(event) === s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                image_credit（licensed / organizer_granted 時）
+                <input
+                  form="event-edit-form"
+                  type="text"
+                  name="image_credit"
+                  value={event.image_credit ?? ''}
+                />
+              </label>
+              <p class="hint compact">
+                画像項目も「基本情報を保存」で一緒に保存されます。
+              </p>
+            </section>
+
+            <section class="admin-panel reaction-section">
+              <h2>SNS・Web反応</h2>
+              <p class="hint compact">
+                イベント公開状態とは別です。公開ページには published の反応要約のみ出ます。
+              </p>
+              {reactionLoadNote && <p class="err">{reactionLoadNote}</p>}
+
+              <div class="reaction-summary-card">
+                <div>
+                  <span class="card-k">status</span>
+                  <strong class={`badge badge--reaction-${reactionSummary?.status ?? 'none'}`}>
+                    {reactionStatusLabel}
+                  </strong>
+                </div>
+                <div>
+                  <span class="card-k">confidence</span>
+                  <strong>{reactionSummary?.confidence ?? '—'}</strong>
+                </div>
+                <div>
+                  <span class="card-k">source_count</span>
+                  <strong>{reactionSummary?.source_count ?? 0}</strong>
+                </div>
+                <div>
+                  <span class="card-k">generated_at</span>
+                  <strong class="card-v-sm">{reactionSummary?.generated_at ?? '—'}</strong>
+                </div>
+              </div>
+
+              {
+                (reactionSummary?.source_count ?? reactionSources.length) > 0 &&
+                  (reactionSummary?.source_count ?? reactionSources.length) < 10 && (
+                    <p class="hint compact reaction-low-source-note">
+                      投稿数が少ないため、傾向は参考情報です
+                    </p>
+                  )
+              }
+
+              <div class="reaction-actions reaction-actions--ai">
+                <form method="post" action="/admin/events/" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="reaction_ai_generate" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <button type="submit" class="btn btn--secondary">
+                    AI要約を生成
+                  </button>
+                </form>
+                <p class="hint compact">
+                  サーバー側のみ（ブラウザから OpenAI は呼びません）。生成後は draft。自動 Publish
+                  しません。ソース3件未満はスキップ。published/hidden は上書きしません。
+                </p>
+              </div>
+
+              <form method="post" action="/admin/events/" class="reaction-form">
+                <input type="hidden" name="csrf_token" value={csrfToken} />
+                <input type="hidden" name="intent" value="reaction_save" />
+                <input type="hidden" name="event_id" value={String(event.id)} />
+
+                <label>
+                  要約 bullets（1行1項目）
+                  <textarea
+                    name="summary_bullets"
+                    rows="6"
+                    placeholder={'・週末は混雑したという反応が多めです\n・子ども連れでも楽しめたという声があります'}
+                  >{reactionBulletsText}</textarea>
+                </label>
+
+                {
+                  reactionBulletDebug.length > 0 && (
+                    <details class="reaction-theme-debug">
+                      <summary class="hint compact">
+                        DEV: bullet theme 推定（保存なし・公開非表示）
+                      </summary>
+                      <ul class="reaction-theme-debug__list">
+                        {reactionBulletDebug.map((b) => (
+                          <li>
+                            <code>{b.theme}</code>
+                            <span>{b.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )
+                }
+
+                <fieldset class="reaction-signals">
+                  <legend>signals</legend>
+                  <div class="form-row">
+                    <label>
+                      crowd_level
+                      <select name="crowd_level">
+                        <option value="">（なし）</option>
+                        <option
+                          value="high"
+                          selected={reactionSignals.crowd_level === 'high'}
+                        >
+                          high
+                        </option>
+                        <option
+                          value="medium"
+                          selected={reactionSignals.crowd_level === 'medium'}
+                        >
+                          medium
+                        </option>
+                        <option
+                          value="low"
+                          selected={reactionSignals.crowd_level === 'low'}
+                        >
+                          low
+                        </option>
+                      </select>
+                    </label>
+                    <label>
+                      wait_time
+                      <select name="wait_time">
+                        <option value="">（なし）</option>
+                        <option
+                          value="long"
+                          selected={reactionSignals.wait_time === 'long'}
+                        >
+                          long
+                        </option>
+                        <option
+                          value="medium"
+                          selected={reactionSignals.wait_time === 'medium'}
+                        >
+                          medium
+                        </option>
+                        <option
+                          value="short"
+                          selected={reactionSignals.wait_time === 'short'}
+                        >
+                          short
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="check-row">
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        name="signal_family"
+                        value="1"
+                        checked={reactionSignals.family === true}
+                      />
+                      子ども向け
+                    </label>
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        name="signal_date"
+                        value="1"
+                        checked={reactionSignals.date === true}
+                      />
+                      デート
+                    </label>
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        name="signal_solo"
+                        value="1"
+                        checked={reactionSignals.solo === true}
+                      />
+                      一人向け
+                    </label>
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        name="signal_photo"
+                        value="1"
+                        checked={reactionSignals.photo === true}
+                      />
+                      写真映え
+                    </label>
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        name="signal_rain"
+                        value="1"
+                        checked={reactionSignals.rain === true}
+                      />
+                      雨の日
+                    </label>
+                  </div>
+                  <label>
+                    recommended_time
+                    <input
+                      type="text"
+                      name="recommended_time"
+                      value={reactionSignals.recommended_time ?? ''}
+                      placeholder="例: 夕方"
+                    />
+                  </label>
+                </fieldset>
+
+                <div class="form-row">
+                  <label>
+                    source_count
+                    <input
+                      type="number"
+                      name="source_count"
+                      min="0"
+                      max="999"
+                      value={String(reactionSummary?.source_count ?? 0)}
+                    />
+                  </label>
+                  <label>
+                    confidence
+                    <select name="confidence">
+                      <option
+                        value="low"
+                        selected={(reactionSummary?.confidence ?? 'low') === 'low'}
+                      >
+                        low
+                      </option>
+                      <option
+                        value="medium"
+                        selected={reactionSummary?.confidence === 'medium'}
+                      >
+                        medium
+                      </option>
+                      <option
+                        value="high"
+                        selected={reactionSummary?.confidence === 'high'}
+                      >
+                        high
+                      </option>
+                    </select>
+                  </label>
+                </div>
+
+                <label class="check">
+                  <input type="checkbox" name="mark_reviewed" value="1" />
+                  保存時に reaction status=reviewed（published は維持）
+                </label>
+
+                <div class="reaction-actions">
+                  <button type="submit" class="btn btn--primary">反応を保存</button>
+                </div>
+              </form>
+
+              <div class="reaction-actions reaction-actions--status">
+                <span class="action-label">反応の公開状態（イベント本体とは別）</span>
+                <form method="post" action="/admin/events/" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="reaction_publish" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <button type="submit" class="btn btn--secondary">
+                    Reaction Publish
+                  </button>
+                </form>
+                <form method="post" action="/admin/events/" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="reaction_hide" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <button type="submit" class="btn btn--ghost">Reaction Hidden</button>
+                </form>
+              </div>
+
+              <details class="sources-fold">
+                <summary>
+                  根拠ソース {reactionSources.length}件
+                  <span class="hint">（内部確認用・公開非表示）</span>
+                </summary>
+                {
+                  reactionSources.length === 0 ? (
+                    <p class="hint">
+                      ソースはまだありません。collect:reaction-web または SQL
+                      シードで追加できます。
+                    </p>
+                  ) : (
+                    <ul class="reaction-sources">
+                      {reactionSources.map((src) => (
+                        <li>
+                          <div class="src-line">
+                            <strong>{src.source_type}</strong>
+                            {src.source_name ? ` · ${src.source_name}` : ''}
+                          </div>
+                          {src.source_url && (
+                            <div class="src-line">
+                              <a href={src.source_url} target="_blank" rel="noopener">
+                                {src.source_url}
+                              </a>
+                            </div>
+                          )}
+                          {src.observed_at && (
+                            <div class="hint compact">observed: {src.observed_at}</div>
+                          )}
+                          {src.excerpt_for_internal_review && (
+                            <p class="excerpt">{src.excerpt_for_internal_review}</p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                }
+              </details>
+            </section>
+          </div>
+        </div>
+
+        <details class="danger-fold">
+          <summary>Danger Zone（削除）</summary>
+          <div class="danger-zone-inner">
+            <p class="err">
+              物理削除します。event_sources / field_reviews は CASCADE、dedupe reviews
+              は SET NULL されます。
+            </p>
+            <form
+              method="post"
+              action="/admin/events/"
+              id="delete-form"
+              onsubmit="return confirm('本当に削除しますか？この操作は取り消せません。');"
+            >
               <input type="hidden" name="csrf_token" value={csrfToken} />
-              <input type="hidden" name="intent" value="reaction_publish" />
+              <input type="hidden" name="intent" value="delete_event" />
               <input type="hidden" name="event_id" value={String(event.id)} />
-              <button type="submit">Publish</button>
-            </form>
-            <form method="post" action="/admin/events/" class="inline-form">
-              <input type="hidden" name="csrf_token" value={csrfToken} />
-              <input type="hidden" name="intent" value="reaction_hide" />
-              <input type="hidden" name="event_id" value={String(event.id)} />
-              <button type="submit">Hidden</button>
+              <label>
+                確認のため event id を入力: <strong>{event.id}</strong>
+                <input
+                  type="text"
+                  name="confirm_delete"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  placeholder={String(event.id)}
+                  required
+                />
+              </label>
+              <button type="submit" class="btn-danger">イベントを削除</button>
             </form>
           </div>
-
-          <h3>根拠ソース（内部確認用）</h3>
-          {
-            reactionSources.length === 0 ? (
-              <p class="hint">
-                ソースはまだありません。Phase 4A では SQL シードまたは将来の取得ジョブで追加します。
-              </p>
-            ) : (
-              <ul class="reaction-sources">
-                {reactionSources.map((src) => (
-                  <li>
-                    <strong>{src.source_type}</strong>
-                    {src.source_name ? ` · ${src.source_name}` : ''}
-                    {src.source_url && (
-                      <>
-                        {' · '}
-                        <a href={src.source_url} target="_blank" rel="noopener">
-                          URL
-                        </a>
-                      </>
-                    )}
-                    {src.observed_at && (
-                      <span class="hint"> · observed: {src.observed_at}</span>
-                    )}
-                    {src.excerpt_for_internal_review && (
-                      <p class="excerpt">{src.excerpt_for_internal_review}</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )
-          }
-        </section>
-
-        <div class="admin-panel">
-          <h2>Visibility</h2>
-          {isPublished && (
-            <form method="post" action="/admin/events/" class="inline-form">
-              <input type="hidden" name="csrf_token" value={csrfToken} />
-              <input type="hidden" name="intent" value="hide_event" />
-              <input type="hidden" name="event_id" value={String(event.id)} />
-              <button type="submit">公開サイトから非表示（hidden）</button>
-            </form>
-          )}
-          {isHidden && (
-            <form method="post" action="/admin/events/" class="inline-form">
-              <input type="hidden" name="csrf_token" value={csrfToken} />
-              <input type="hidden" name="intent" value="unhide_event" />
-              <input type="hidden" name="event_id" value={String(event.id)} />
-              <button type="submit">再公開（published）</button>
-            </form>
-          )}
-          {isDraft && (
-            <p class="hint">
-              draft の公開は <a href="/admin/events/draft/">Draft workspace</a> から
-              Publish してください。
-            </p>
-          )}
-        </div>
-
-        <div class="admin-panel danger-zone">
-          <h2>Danger Zone</h2>
-          <p class="err">
-            物理削除します。event_sources / field_reviews は CASCADE、dedupe reviews
-            は SET NULL されます。
-          </p>
-          <form
-            method="post"
-            action="/admin/events/"
-            id="delete-form"
-            onsubmit="return confirm('本当に削除しますか？この操作は取り消せません。');"
-          >
-            <input type="hidden" name="csrf_token" value={csrfToken} />
-            <input type="hidden" name="intent" value="delete_event" />
-            <input type="hidden" name="event_id" value={String(event.id)} />
-            <label>
-              確認のため event id を入力: <strong>{event.id}</strong>
-              <input
-                type="text"
-                name="confirm_delete"
-                inputmode="numeric"
-                autocomplete="off"
-                placeholder={String(event.id)}
-                required
-              />
-            </label>
-            <button type="submit" class="btn-danger">イベントを削除</button>
-          </form>
-        </div>
+        </details>
       </>
     )
   }
 </AdminLayout>
 
 <style>
-  .edit-form label {
-    display: block;
-    margin-bottom: 0.75rem;
+  .crumb {
+    margin: 0 0 0.75rem;
+  }
+
+  .event-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem 1.5rem;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+  }
+
+  .event-header__id {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #64748b;
     font-weight: 600;
+  }
+
+  .event-header__title {
+    margin: 0.15rem 0 0.65rem;
+    font-size: clamp(1.25rem, 2.4vw, 1.65rem);
+    line-height: 1.25;
+  }
+
+  .event-header__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .event-header__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .event-header__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: min(100%, 12rem);
+  }
+
+  .action-label {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: #e2e8f0;
+    color: #334155;
+  }
+
+  .badge--event-published {
+    background: #dcfce7;
+    color: #166534;
+  }
+  .badge--event-hidden {
+    background: #f1f5f9;
+    color: #475569;
+  }
+  .badge--event-draft {
+    background: #fef9c3;
+    color: #854d0e;
+  }
+
+  .badge--schedule-ongoing {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+  .badge--schedule-upcoming {
+    background: #e0e7ff;
+    color: #3730a3;
+  }
+  .badge--schedule-ended {
+    background: #f1f5f9;
+    color: #64748b;
+  }
+
+  .badge--reaction-published {
+    background: #ccfbf1;
+    color: #0f766e;
+  }
+  .badge--reaction-draft,
+  .badge--reaction-reviewed {
+    background: #ffedd5;
+    color: #9a3412;
+  }
+  .badge--reaction-hidden,
+  .badge--reaction-none {
+    background: #f1f5f9;
+    color: #64748b;
+  }
+
+  .meta-chip {
+    font-size: 0.8rem;
+    color: #475569;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 0.12rem 0.45rem;
+  }
+
+  .btn {
+    appearance: none;
+    border-radius: 8px;
+    padding: 0.55rem 0.9rem;
+    font-weight: 700;
     font-size: 0.9rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    line-height: 1.2;
+  }
+  .btn--primary {
+    background: #0f766e;
+    color: #fff;
+  }
+  .btn--secondary {
+    background: #fff;
+    color: #0f172a;
+    border-color: #cbd5e1;
+  }
+  .btn--ghost {
+    background: #f8fafc;
+    color: #475569;
+    border-color: #e2e8f0;
+  }
+  .btn--save {
+    margin-top: 0.25rem;
+  }
+
+  /* Astro scoped でも確実に効くよう :global で layout を指定 */
+  :global(.admin-event-main) {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr);
+    gap: 16px;
+    align-items: start;
+    width: 100%;
+  }
+
+  :global(.admin-event-main__left) {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  :global(.admin-event-main__right) {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  :global(.admin-event-main__left.admin-panel),
+  :global(.admin-event-main__right .admin-panel) {
+    margin-bottom: 0;
+  }
+
+  .subhead {
+    margin: 1.1rem 0 0.55rem;
+    font-size: 0.85rem;
+    color: #64748b;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .edit-form label,
+  .image-panel label,
+  .reaction-form label {
+    display: block;
+    margin-bottom: 0.85rem;
+    font-weight: 600;
+    font-size: 0.88rem;
   }
 
   .edit-form input[type='text'],
   .edit-form input[type='url'],
   .edit-form input[type='date'],
+  .edit-form input[type='number'],
   .edit-form select,
-  .edit-form textarea {
+  .edit-form textarea,
+  .image-panel input[type='text'],
+  .image-panel input[type='url'],
+  .image-panel select,
+  .reaction-form textarea,
+  .reaction-form input[type='text'],
+  .reaction-form input[type='number'],
+  .reaction-form select,
+  .danger-fold input[type='text'] {
     display: block;
     width: 100%;
-    max-width: 36rem;
-    margin-top: 0.25rem;
-    padding: 0.4rem 0.5rem;
+    max-width: none;
+    margin-top: 0.3rem;
+    padding: 0.5rem 0.65rem;
     font-weight: 400;
+    font-size: 0.95rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    box-sizing: border-box;
   }
 
   .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 1rem;
+  }
+
+  .form-footer {
+    position: sticky;
+    bottom: 0.75rem;
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    background: linear-gradient(180deg, transparent, #fff 28%);
+  }
+
+  .image-preview {
+    margin: 0 0 0.85rem;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    aspect-ratio: 16 / 10;
+    display: grid;
+    place-items: center;
+  }
+
+  .image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .reaction-summary-card {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem 0.75rem;
+    padding: 0.75rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+  }
+
+  .card-k {
+    display: block;
+    font-size: 0.7rem;
+    color: #64748b;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .card-v-sm {
+    font-size: 0.78rem;
+    font-weight: 600;
+    word-break: break-all;
+  }
+
+  .reaction-signals {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.75rem 0.85rem 0.35rem;
+    margin: 0 0 1rem;
+  }
+
+  .reaction-signals legend {
+    font-weight: 700;
+    padding: 0 0.25rem;
+  }
+
+  .check-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 1rem;
+    gap: 0.45rem 0.9rem;
+    margin: 0.35rem 0 0.75rem;
+  }
+
+  .check {
+    font-weight: 500 !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.5rem !important;
+  }
+
+  .check input {
+    width: auto !important;
+    margin: 0 !important;
+  }
+
+  .reaction-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.65rem;
+    align-items: center;
+    margin: 0.35rem 0 0.85rem;
+  }
+
+  .reaction-actions--status {
+    padding-top: 0.35rem;
+    border-top: 1px dashed #e2e8f0;
+  }
+
+  .reaction-theme-debug {
+    margin: 8px 0 12px;
+  }
+
+  .reaction-theme-debug__list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .reaction-theme-debug__list li {
+    font-size: 12px;
+    color: #64748b;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .reaction-theme-debug__list code {
+    flex: 0 0 auto;
+    font-size: 11px;
+    background: #f0f2f5;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  .sources-fold {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.55rem 0.75rem;
+    background: #fff;
+  }
+
+  .sources-fold summary {
+    cursor: pointer;
+    font-weight: 700;
+    list-style: none;
+  }
+
+  .sources-fold summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .sources-fold summary::before {
+    content: '▸ ';
+    color: #64748b;
+  }
+
+  .sources-fold[open] summary::before {
+    content: '▾ ';
+  }
+
+  .reaction-sources {
+    margin: 0.65rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .reaction-sources li {
+    padding: 0.65rem 0;
+    border-top: 1px solid #eef2f7;
+  }
+
+  .src-line {
+    font-size: 0.88rem;
+    word-break: break-all;
+  }
+
+  .excerpt {
+    margin: 0.35rem 0 0;
+    font-size: 0.85rem;
+    color: #475569;
+    background: #f8fafc;
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
   }
 
   .sync-warn {
     background: #fff8e6;
     border: 1px solid #e6c200;
     padding: 0.5rem 0.75rem;
-    margin: 0.5rem 0 0;
+    margin: 0.65rem 0 0;
+    border-radius: 8px;
   }
 
-  .danger-zone {
-    border-color: #e88;
+  .hint.compact {
+    margin: 0.25rem 0 0;
+    font-size: 0.85rem;
+  }
+
+  .danger-fold {
+    margin: 1.25rem 0 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    padding: 0.55rem 0.85rem;
+  }
+
+  .danger-fold summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: #64748b;
+  }
+
+  .danger-fold[open] {
+    border-color: #f1a8a8;
     background: #fff5f5;
+  }
+
+  .danger-fold[open] summary {
+    color: #a40000;
+  }
+
+  .danger-zone-inner {
+    margin-top: 0.65rem;
   }
 
   .btn-danger {
@@ -577,6 +1220,11 @@ const reactionBulletsText = bulletsToTextarea(reactionSummary?.summary_bullets ?
     font-weight: 700;
     cursor: pointer;
     margin-top: 0.5rem;
+    border-radius: 8px;
+  }
+
+  .inline-form {
+    display: inline;
   }
 
   .inline-form button {
@@ -587,71 +1235,28 @@ const reactionBulletsText = bulletsToTextarea(reactionSummary?.summary_bullets ?
     margin-top: 0;
   }
 
-  .reaction-section h2,
-  .reaction-section h3 {
-    margin-top: 0;
-  }
+  @media (max-width: 960px) {
+    :global(.admin-event-main) {
+      grid-template-columns: 1fr;
+    }
 
-  .reaction-form label {
-    display: block;
-    margin-bottom: 0.75rem;
-    font-weight: 600;
-    font-size: 0.9rem;
-  }
+    :global(.admin-event-main__left),
+    :global(.admin-event-main__right) {
+      grid-column: 1;
+      grid-row: auto;
+    }
 
-  .reaction-form textarea,
-  .reaction-form input[type='text'],
-  .reaction-form input[type='number'],
-  .reaction-form select {
-    display: block;
-    width: 100%;
-    max-width: 36rem;
-    margin-top: 0.25rem;
-    padding: 0.4rem 0.5rem;
-    font-weight: 400;
-  }
+    .form-row {
+      grid-template-columns: 1fr;
+    }
 
-  .reaction-signals {
-    border: 1px solid #dbe3ea;
-    border-radius: 8px;
-    padding: 0.75rem 1rem 0.25rem;
-    margin: 0 0 1rem;
-    max-width: 36rem;
-  }
+    .event-header__actions {
+      width: 100%;
+    }
 
-  .reaction-signals legend {
-    font-weight: 700;
-    padding: 0 0.25rem;
-  }
-
-  .reaction-form label.check {
-    font-weight: 500;
-  }
-
-  .reaction-form label.check input {
-    display: inline;
-    width: auto;
-    margin-right: 0.4rem;
-  }
-
-  .reaction-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin: 0.75rem 0 1rem;
-  }
-
-  .reaction-sources {
-    margin: 0;
-    padding-left: 1.1rem;
-  }
-
-  .reaction-sources .excerpt {
-    margin: 0.25rem 0 0.75rem;
-    font-size: 0.85rem;
-    color: #555;
-    background: #f6f8fa;
-    padding: 0.4rem 0.6rem;
-    border-radius: 4px;
+    .form-footer {
+      position: static;
+      background: none;
+    }
   }
 </style>

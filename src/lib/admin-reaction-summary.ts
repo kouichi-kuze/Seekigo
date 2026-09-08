@@ -1,6 +1,7 @@
 /**
- * DEV admin: SNS・Web 反応要約の保存 / Publish / Hidden。
+ * DEV admin: SNS・Web 反応要約の保存 / Publish / Hidden / AI 生成.
  */
+import OpenAI from 'openai'
 import { createAdminClient } from './supabase-admin'
 import {
   parsePositiveIntIds,
@@ -18,6 +19,13 @@ import {
   type ReactionSignals,
   type ReactionWaitLevel,
 } from './event-reaction-summary'
+import {
+  aiSignalsToDbSignals,
+  buildReactionSummaryAiPayload,
+  generateReactionSummaryWithAi,
+  MIN_REACTION_SOURCES_FOR_AI,
+  resolveReactionSummaryModel,
+} from './reaction-summary-ai'
 
 type AdminCookies = {
   get: (name: string) => { value: string } | undefined
@@ -78,6 +86,151 @@ function readConfidence(form: FormData): ReactionConfidence {
     : 'low'
 }
 
+async function processReactionAiGenerate(opts: {
+  eventId: number
+  force: boolean
+}): Promise<AdminReactionResult> {
+  const { eventId, force } = opts
+  const returnTo = `/admin/events/${eventId}/`
+  const admin = createAdminClient()
+
+  const { data: existing, error: sumErr } = await admin
+    .from('event_reaction_summaries')
+    .select('id, status')
+    .eq('event_id', eventId)
+    .maybeSingle()
+  if (sumErr) {
+    logReactionPost({
+      intent: 'reaction_ai_generate',
+      event_id: eventId,
+      ok: false,
+      error: sumErr.message,
+    })
+    return { ok: false, message: sumErr.message }
+  }
+
+  const status = existing ? String(existing.status ?? 'draft') : null
+  if ((status === 'published' || status === 'hidden') && !force) {
+    logReactionPost({
+      intent: 'reaction_ai_generate',
+      event_id: eventId,
+      ok: false,
+      reason: `status_${status}_needs_force`,
+    })
+    return {
+      ok: false,
+      message: `反応要約が ${status} のため上書きしません（force が必要）`,
+    }
+  }
+
+  const { data: event, error: evErr } = await admin
+    .from('events')
+    .select('id, title, venue, area, start_date, end_date, category')
+    .eq('id', eventId)
+    .maybeSingle()
+  if (evErr) return { ok: false, message: evErr.message }
+  if (!event) return { ok: false, message: 'Event not found' }
+
+  const { data: sources, error: srcErr } = await admin
+    .from('event_reaction_sources')
+    .select(
+      'source_type, observed_at, excerpt_for_internal_review, source_name, created_at',
+    )
+    .eq('event_id', eventId)
+    .order('observed_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(40)
+  if (srcErr) return { ok: false, message: srcErr.message }
+
+  const payload = buildReactionSummaryAiPayload({
+    event: {
+      title: String(event.title ?? ''),
+      venue: (event.venue as string | null) ?? null,
+      area: (event.area as string | null) ?? null,
+      start_date: (event.start_date as string | null) ?? null,
+      end_date: (event.end_date as string | null) ?? null,
+      category: (event.category as string[] | string | null) ?? null,
+    },
+    sources: sources ?? [],
+  })
+
+  if (payload.sources.length < MIN_REACTION_SOURCES_FOR_AI) {
+    logReactionPost({
+      intent: 'reaction_ai_generate',
+      event_id: eventId,
+      ok: false,
+      reason: 'insufficient_sources',
+      source_count: payload.sources.length,
+    })
+    return {
+      ok: false,
+      message: `ソースが不足しています（${payload.sources.length}/${MIN_REACTION_SOURCES_FOR_AI}）`,
+    }
+  }
+
+  const apiKey =
+    import.meta.env.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()
+  if (!apiKey) {
+    return { ok: false, message: 'OPENAI_API_KEY が未設定です' }
+  }
+
+  const model = resolveReactionSummaryModel()
+  try {
+    const openai = new OpenAI({ apiKey })
+    const result = await generateReactionSummaryWithAi(openai, model, payload)
+    const now = new Date().toISOString()
+    const signals = aiSignalsToDbSignals(result.output)
+    const patch = {
+      summary_bullets: result.output.summary_bullets,
+      signals,
+      source_count: payload.sources.length,
+      confidence: result.output.confidence,
+      generated_at: now,
+      status: 'draft' as const,
+    }
+
+    if (existing) {
+      const { error: upErr } = await admin
+        .from('event_reaction_summaries')
+        .update(patch)
+        .eq('event_id', eventId)
+      if (upErr) return { ok: false, message: upErr.message }
+    } else {
+      const { error: insErr } = await admin
+        .from('event_reaction_summaries')
+        .insert({
+          event_id: eventId,
+          ...patch,
+        })
+      if (insErr) return { ok: false, message: insErr.message }
+    }
+
+    logReactionPost({
+      intent: 'reaction_ai_generate',
+      event_id: eventId,
+      ok: true,
+      source_count: payload.sources.length,
+      bullet_count: result.output.summary_bullets.length,
+      confidence: result.output.confidence,
+      model: result.model,
+      estimated_cost: result.usage.estimated_cost_display,
+      prompt_tokens: result.usage.prompt_tokens,
+      completion_tokens: result.usage.completion_tokens,
+    })
+
+    return { ok: true, redirectTo: `${returnTo}?reaction_ai=1` }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    logReactionPost({
+      intent: 'reaction_ai_generate',
+      event_id: eventId,
+      ok: false,
+      error: msg.slice(0, 200),
+    })
+    return { ok: false, message: `AI生成失敗: ${msg}` }
+  }
+}
+
 export async function processAdminReactionSummaryPost(opts: {
   request: Request
   url: URL
@@ -114,6 +267,13 @@ export async function processAdminReactionSummaryPost(opts: {
   const returnTo = `/admin/events/${eventId}/`
   const admin = createAdminClient()
 
+  if (intent === 'reaction_ai_generate') {
+    const force =
+      String(form.get('force') ?? '') === '1' ||
+      String(form.get('force') ?? '') === 'true'
+    return processReactionAiGenerate({ eventId, force })
+  }
+
   if (intent === 'reaction_publish' || intent === 'reaction_hide') {
     const { data: existing, error } = await admin
       .from('event_reaction_summaries')
@@ -138,7 +298,10 @@ export async function processAdminReactionSummaryPost(opts: {
         ok: false,
         reason: 'summary_missing',
       })
-      return { ok: false, message: '反応要約がまだありません。先に保存してください。' }
+      return {
+        ok: false,
+        message: '反応要約がまだありません。先に保存してください。',
+      }
     }
     const bullets = Array.isArray(existing.summary_bullets)
       ? existing.summary_bullets
@@ -188,12 +351,18 @@ export async function processAdminReactionSummaryPost(opts: {
       update_result: 'ok',
     })
 
-    const flag = intent === 'reaction_publish' ? 'reaction_published' : 'reaction_hidden'
+    const flag =
+      intent === 'reaction_publish' ? 'reaction_published' : 'reaction_hidden'
     return { ok: true, redirectTo: `${returnTo}?${flag}=1` }
   }
 
   if (intent !== 'reaction_save') {
-    logReactionPost({ intent, event_id: eventId, ok: false, reason: 'invalid_intent' })
+    logReactionPost({
+      intent,
+      event_id: eventId,
+      ok: false,
+      reason: 'invalid_intent',
+    })
     return { ok: false, message: 'Invalid reaction request' }
   }
 
