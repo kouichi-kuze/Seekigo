@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none">
+  <!-- Legacy wordmark (pre Brand B). Text-only Seek / igo split. Not used on site. -->
+  <text x="0" y="36" font-family="system-ui, sans-serif" font-size="36" font-weight="800" letter-spacing="-1">
+    <tspan fill="#111827">Seek</tspan><tspan fill="#0EA5E9">igo</tspan>
+  </text>
+</svg>

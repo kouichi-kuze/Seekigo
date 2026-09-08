@@ -21,7 +21,8 @@
     "fetch:enjoytokyo:details": "tsx scripts/fetch-enjoytokyo-details.ts",
     "dedupe:enjoytokyo": "tsx scripts/check-event-duplicates.ts",
     "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts",
-    "import:walkerplus": "tsx scripts/import-walkerplus-supabase.ts"
+    "import:walkerplus": "tsx scripts/import-walkerplus-supabase.ts",
+    "brand:export": "tsx scripts/export-brand-assets.ts"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "dotenv": "^17.4.2",
+    "sharp": "^0.35.4",
     "tsx": "^4.23.12"
   }
 }

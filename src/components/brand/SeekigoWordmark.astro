@@ -1,0 +1,42 @@
+---
+interface Props {
+  class?: string
+}
+
+const { class: className } = Astro.props
+---
+
+<span class:list={['wm', className]}>
+  <span class="wm__navy">Seek</span><span class="wm__i">i</span><span class="wm__go">go</span>
+</span>
+
+<style>
+  .wm {
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .wm__navy,
+  .wm__i {
+    color: var(--c-navy);
+  }
+  .wm__go {
+    color: var(--c-cyan);
+  }
+  .wm__i {
+    position: relative;
+  }
+  .wm__i::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0.06em;
+    width: 0.26em;
+    height: 0.26em;
+    margin-left: -0.13em;
+    background: var(--c-cyan);
+    border-radius: 50%;
+  }
+</style>

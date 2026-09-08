@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- SNS profile: symbol on white square. -->
+  <rect width="64" height="64" fill="#fff"/>
+  <svg x="10" y="2" width="44" height="60" viewBox="0 0 80 108">
+    <path fill="#00A3FF" d="M70.2 5.2 72.4 10.4 77.6 12.6 72.4 14.8 70.2 20 68 14.8 62.8 12.6 68 10.4Z"/>
+    <path fill="#0E2744" d="M40 3c16.6 0 30 13.2 30 30.2 0 20.4-19.2 37.6-30 70.8C29.2 70.8 10 53.6 10 33.2 10 16.2 23.4 3 40 3Z"/>
+    <g clip-path="url(#sg-social-pin)">
+      <circle cx="29.5" cy="25.5" r="6.6" fill="#00A3FF"/>
+      <path fill="#00A3FF" d="M15 53.5 33 65.5 16.5 72Z"/>
+      <path stroke="#fff" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round" d="M22 36c15.5-6 26 3 19 14-7.5 11.5-6 21 9 32"/>
+      <path fill="#fff" fill-opacity=".28" d="M51.2 36.5 55 24.5 58.8 36.5 57 36.5 61.2 68H48.8L53 36.5Z"/>
+      <rect width="12.6" height="1.8" x="48.7" y="49.2" fill="#fff" fill-opacity=".28" rx=".4"/>
+      <rect width="10.2" height="1.5" x="49.9" y="42.2" fill="#fff" fill-opacity=".28" rx=".3"/>
+    </g>
+    <defs>
+      <clipPath id="sg-social-pin">
+        <path d="M40 3c16.6 0 30 13.2 30 30.2 0 20.4-19.2 37.6-30 70.8C29.2 70.8 10 53.6 10 33.2 10 16.2 23.4 3 40 3Z"/>
+      </clipPath>
+    </defs>
+  </svg>
+</svg>

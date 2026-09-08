@@ -1,0 +1,120 @@
+---
+/**
+ * TOP KV 用の軽い線画デコ。写真背景やグラデは使わない。
+ * 東京 / 発見 / 移動 / イベントを最小要素で示す。
+ */
+---
+
+<div class="hero-decor" aria-hidden="true">
+  <svg class="hero-decor__svg" viewBox="0 0 560 420" fill="none">
+    <circle class="hero-decor__blob hero-decor__blob--cyan" cx="430" cy="70" r="120" fill="var(--c-cyan)" fill-opacity="0.08" />
+    <circle class="hero-decor__blob hero-decor__blob--navy" cx="80" cy="340" r="90" fill="var(--c-navy)" fill-opacity="0.04" />
+    <circle class="hero-decor__spark" cx="468" cy="46" r="4" fill="var(--c-lime, #A3E635)" />
+    <path
+      class="hero-decor__path"
+      d="M40 300 C140 240, 220 250, 280 190 C340 130, 380 110, 470 86"
+      stroke="var(--c-cyan)"
+      stroke-width="2"
+      stroke-dasharray="6 8"
+      stroke-linecap="round"
+    />
+    <g class="hero-decor__pin" transform="translate(452, 48)">
+      <path fill="var(--c-cyan)" d="M18 0c8 0 14 6.2 14 14.2C32 24 22 33.2 18 48 14 33.2 4 24 4 14.2 4 6.2 10 0 18 0Z" />
+      <circle cx="18" cy="14" r="4.2" fill="#fff" />
+    </g>
+    <g class="hero-decor__skyline" transform="translate(120, 268)" stroke="var(--c-navy)" stroke-opacity="0.28" stroke-width="1.8" fill="none">
+      <path d="M0 92 V52 L22 24 44 52 V92" />
+      <path d="M58 92 V40 L86 8 114 40 V92" />
+      <path d="M128 92 V58 L146 38 164 58 V92" />
+      <path d="M178 92 V48 H206 V92" />
+      <path d="M220 92 C268 92 300 64 348 64" />
+    </g>
+    <g class="hero-decor__lantern" transform="translate(78, 168)">
+      <rect x="14" y="10" width="22" height="28" rx="8" stroke="var(--c-navy)" stroke-opacity="0.35" stroke-width="1.6" fill="var(--c-cyan)" fill-opacity="0.12" />
+      <path d="M25 0 v10 M18 38 q7 10 14 0" stroke="var(--c-navy)" stroke-opacity="0.35" stroke-width="1.6" fill="none" />
+    </g>
+  </svg>
+</div>
+
+<style>
+  .hero-decor {
+    position: absolute;
+    inset: 0 0 auto auto;
+    width: min(46%, 520px);
+    height: 100%;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .hero-decor__svg {
+    width: 100%;
+    height: 100%;
+  }
+  .hero-decor__path {
+    stroke-dashoffset: 80;
+    animation: hero-path 18s linear infinite;
+  }
+  .hero-decor__spark {
+    transform-origin: 468px 46px;
+    animation: hero-spark 2.8s ease-in-out infinite;
+  }
+  .hero-decor__pin {
+    animation: hero-float 5s ease-in-out infinite;
+  }
+
+  @keyframes hero-path {
+    to { stroke-dashoffset: 0; }
+  }
+  @keyframes hero-spark {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.25); }
+  }
+  @keyframes hero-float {
+    0%, 100% { transform: translate(452px, 48px); }
+    50% { transform: translate(452px, 40px); }
+  }
+
+  /* tablet: 右上のみ、本文と重なりにくく */
+  @media (max-width: 1023px) {
+    .hero-decor {
+      width: min(42%, 420px);
+      opacity: 0.72;
+    }
+  }
+
+  /* mobile: 右上のピン/スパーク程度に縮小。提灯・左blobは隠す */
+  @media (max-width: 719px) {
+    .hero-decor {
+      width: 42%;
+      max-width: 180px;
+      height: 140px;
+      top: 0;
+      right: 0;
+      opacity: 0.4;
+    }
+    .hero-decor__lantern,
+    .hero-decor__blob--navy,
+    .hero-decor__path {
+      display: none;
+    }
+    .hero-decor__skyline {
+      opacity: 0.55;
+    }
+  }
+
+  @media (max-width: 419px) {
+    .hero-decor {
+      width: 36%;
+      max-width: 132px;
+      height: 112px;
+      opacity: 0.32;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-decor__path,
+    .hero-decor__spark,
+    .hero-decor__pin {
+      animation: none;
+    }
+  }
+</style>

@@ -1,5 +1,7 @@
 ---
 import GoogleAnalytics from '../components/GoogleAnalytics.astro'
+import SeekigoLogo from '../components/brand/SeekigoLogo.astro'
+import { BRAND_ASSETS, OG_IMAGE_SIZE } from '../lib/brand'
 
 interface Props {
   title: string
@@ -8,9 +10,25 @@ interface Props {
   noindex?: boolean
   /** 指定時は noindex より優先（例: contact ページは "noindex" のみ） */
   robots?: string
+  /** 省略時はサイト共通 OGP。絶対 URL またはサイト相対パス */
+  ogImage?: string
 }
 
-const { title, description, noindex = false, robots } = Astro.props
+const { title, description, noindex = false, robots, ogImage } = Astro.props
+
+/** pathname のみ（query は canonical / og:url に含めない） */
+const canonical = Astro.site
+  ? new URL(Astro.url.pathname, Astro.site).href
+  : undefined
+
+function toAbsoluteAsset(pathOrUrl: string): string {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl
+  if (Astro.site) return new URL(pathOrUrl, Astro.site).href
+  return pathOrUrl
+}
+
+const resolvedOgImage = toAbsoluteAsset(ogImage ?? BRAND_ASSETS.ogImage)
+const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
 ---
 
 <!doctype html>
@@ -19,23 +37,31 @@ const { title, description, noindex = false, robots } = Astro.props
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" href="/favicon.ico" />
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
-    {robots ? (
-      <meta name="robots" content={robots} />
-    ) : (
-      noindex && <meta name="robots" content="noindex, nofollow" />
-    )}
+    {robotsContent && <meta name="robots" content={robotsContent} />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    <meta property="og:site_name" content="Seekigo" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    {description && <meta property="og:description" content={description} />}
+    {canonical && <meta property="og:url" content={canonical} />}
+    <meta property="og:image" content={resolvedOgImage} />
+    <meta property="og:image:width" content={String(OG_IMAGE_SIZE.width)} />
+    <meta property="og:image:height" content={String(OG_IMAGE_SIZE.height)} />
+    <meta property="og:image:alt" content="Seekigo — 探して、行く。" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    <meta name="twitter:image" content={resolvedOgImage} />
     <GoogleAnalytics />
   </head>
   <body>
     <header class="site-header">
       <div class="inner">
-        <a href="/" class="logo">
-          <span class="logo__seek">Seek</span><span class="logo__igo">igo</span>
-        </a>
+        <SeekigoLogo size="header" />
         <nav class="site-nav" aria-label="主要ナビ">
           <a href="/tokyo/">東京</a>
           <a href="/tokyo/today/" class="site-nav__today">今日</a>
@@ -49,7 +75,8 @@ const { title, description, noindex = false, robots } = Astro.props
     <slot />
 
     <footer class="site-footer">
-      <div class="inner">
+      <div class="inner site-footer__inner">
+        <SeekigoLogo size="footer" />
         <p class="site-footer__copy">© 2025 Seekigo</p>
       </div>
     </footer>
@@ -59,10 +86,13 @@ const { title, description, noindex = false, robots } = Astro.props
 <style is:global>
   /* ─── Design Tokens ─── */
   :root {
-    --c-primary:      #0EA5E9;
-    --c-primary-dk:   #0284C7;
+    --c-navy:         #0E2744;
+    --c-cyan:         #00A3FF;
+    --c-lime:         #A3E635;
+    --c-primary:      #00A3FF;
+    --c-primary-dk:   #0086CC;
     --c-accent:       #A3E635;
-    --c-text:         #111827;
+    --c-text:         #0E2744;
     --c-muted:        #6B7280;
     --c-bg:           #F8FAFC;
     --c-white:        #FFFFFF;
@@ -120,21 +150,16 @@ const { title, description, noindex = false, robots } = Astro.props
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
   }
-
-  .logo {
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    color: var(--c-text) !important;
-  }
-  .logo__seek { color: var(--c-text); }
-  .logo__igo  { color: var(--c-primary); }
 
   .site-nav {
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-shrink: 1;
+    min-width: 0;
   }
   .site-nav a {
     font-size: 14px;
@@ -160,10 +185,13 @@ const { title, description, noindex = false, robots } = Astro.props
   /* SPでは主要2項目のみ（既存レイアウトを壊さない） */
   @media (max-width: 719px) {
     .site-nav {
-      gap: 12px;
+      gap: 10px;
     }
     .site-nav__extra {
       display: none;
+    }
+    .site-nav__today {
+      padding: 6px 12px;
     }
   }
 
@@ -186,6 +214,13 @@ const { title, description, noindex = false, robots } = Astro.props
     margin-top: 80px;
     border-top: 1px solid var(--c-border);
     padding: 32px 0;
+  }
+  .site-footer__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
   }
   .site-footer__copy {
     font-size: 13px;

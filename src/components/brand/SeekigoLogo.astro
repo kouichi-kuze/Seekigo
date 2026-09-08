@@ -1,0 +1,60 @@
+---
+import SeekigoSymbol from './SeekigoSymbol.astro'
+import SeekigoWordmark from './SeekigoWordmark.astro'
+
+interface Props {
+  size?: 'header' | 'hero' | 'footer'
+  href?: string | null
+}
+
+const { size = 'header', href = '/' } = Astro.props
+const Tag = href ? 'a' : 'span'
+---
+
+<Tag
+  class:list={['seekigo-logo', `seekigo-logo--${size}`]}
+  href={href ?? undefined}
+  aria-label="Seekigo ホーム"
+>
+  <SeekigoSymbol class="seekigo-logo__symbol" />
+  <SeekigoWordmark />
+</Tag>
+
+<style>
+  .seekigo-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    color: inherit !important;
+    text-decoration: none !important;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+  .seekigo-logo--header {
+    font-size: 22px;
+  }
+  .seekigo-logo--hero {
+    font-size: clamp(40px, 7vw, 64px);
+  }
+  .seekigo-logo--footer {
+    font-size: 16px;
+  }
+  .seekigo-logo__symbol {
+    width: 1.15em;
+    height: auto;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 719px) {
+    .seekigo-logo--header {
+      font-size: 18px;
+      gap: 0.32em;
+    }
+  }
+
+  @media (max-width: 359px) {
+    .seekigo-logo--header {
+      font-size: 16px;
+    }
+  }
+</style>
