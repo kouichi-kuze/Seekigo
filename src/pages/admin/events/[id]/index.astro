@@ -8,6 +8,12 @@ import { fetchAdminFieldReviews } from '../../../../lib/admin/field-reviews'
 import { IMAGE_USAGE_STATUSES } from '../../../../lib/event-image-usage'
 import { isBodyProtectedFromSync } from '../../../../lib/event-status'
 import { getAdminEventEditStaticPaths } from '../../../../lib/admin/event-edit-paths'
+import {
+  bulletsToTextarea,
+  mapSummaryRow,
+  type EventReactionSourceRow,
+  type EventReactionSummaryRow,
+} from '../../../../lib/event-reaction-summary'
 
 /** 本番 SSG では admin 編集ページを生成しない。DEV では Supabase から id 一覧を取得。 */
 export async function getStaticPaths() {
@@ -29,6 +35,9 @@ const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
 
 let event: AdminEvent | null = null
 let pendingFieldReviews: import('../../../../lib/admin/field-review-display').AdminFieldReviewRow[] = []
+let reactionSummary: EventReactionSummaryRow | null = null
+let reactionSources: EventReactionSourceRow[] = []
+let reactionLoadNote: string | null = null
 let loadError: string | null = null
 let message: string | null = null
 let errorMessage: string | null = Astro.url.searchParams.get('error')
@@ -48,6 +57,12 @@ if (sp.get('saved') === '1') {
   message = `差分を一括承認しました (${sp.get('count') ?? '?'}件)`
 } else if (sp.get('field') === 'rejected_bulk') {
   message = `差分を一括却下しました (${sp.get('count') ?? '?'}件)`
+} else if (sp.get('reaction_saved') === '1') {
+  message = 'SNS・Web反応を保存しました'
+} else if (sp.get('reaction_published') === '1') {
+  message = 'SNS・Web反応を Publish しました'
+} else if (sp.get('reaction_hidden') === '1') {
+  message = 'SNS・Web反応を Hidden にしました'
 }
 
 try {
@@ -65,6 +80,44 @@ try {
       status: 'pending',
       eventId,
     })
+
+    const { data: reactionData, error: reactionError } = await admin
+      .from('event_reaction_summaries')
+      .select(
+        'id, event_id, summary_bullets, signals, source_count, confidence, status, generated_at, reviewed_at, reviewed_by, created_at, updated_at',
+      )
+      .eq('event_id', eventId)
+      .maybeSingle()
+
+    if (reactionError) {
+      const msg = reactionError.message ?? ''
+      if (
+        reactionError.code === '42P01' ||
+        reactionError.code === 'PGRST205' ||
+        /does not exist/i.test(msg) ||
+        /Could not find the table/i.test(msg) ||
+        /schema cache/i.test(msg)
+      ) {
+        reactionLoadNote =
+          'event_reaction_summaries 未作成です。scripts/create-event-reaction-summaries.sql を適用してください。'
+      } else {
+        reactionLoadNote = `反応要約の読み込み失敗: ${msg}`
+      }
+    } else if (reactionData) {
+      reactionSummary = mapSummaryRow(reactionData as Record<string, unknown>)
+      const { data: sourcesData, error: sourcesError } = await admin
+        .from('event_reaction_sources')
+        .select(
+          'id, event_id, summary_id, source_type, source_url, source_name, observed_at, excerpt_for_internal_review, created_at',
+        )
+        .eq('summary_id', reactionSummary.id)
+        .order('observed_at', { ascending: false })
+      if (sourcesError) {
+        reactionLoadNote = `根拠ソースの読み込み失敗: ${sourcesError.message}`
+      } else {
+        reactionSources = (sourcesData ?? []) as EventReactionSourceRow[]
+      }
+    }
   }
 } catch (e) {
   loadError = e instanceof Error ? e.message : String(e)
@@ -89,6 +142,9 @@ const syncProtected = event ? isBodyProtectedFromSync(event.status) : false
 const isDraft = event?.status === 'draft'
 const isPublished = event?.status === 'published'
 const isHidden = event?.status === 'hidden'
+
+const reactionSignals = reactionSummary?.signals ?? {}
+const reactionBulletsText = bulletsToTextarea(reactionSummary?.summary_bullets ?? [])
 ---
 
 <AdminLayout title={event ? `Edit #${event.id}` : 'Edit Event'} csrfToken={csrfToken}>
@@ -233,6 +289,187 @@ const isHidden = event?.status === 'hidden'
           <button type="submit">保存</button>
         </form>
 
+        <section class="admin-panel reaction-section">
+          <h2>SNS・Web反応</h2>
+          <p class="hint">
+            公開情報の傾向要約です。第三者投稿本文は公開ページに出ません。
+            AI 生成後も自動公開せず、人間確認後に Publish してください。
+          </p>
+          {reactionLoadNote && <p class="err">{reactionLoadNote}</p>}
+
+          <form method="post" action="/admin/events/" class="reaction-form">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="reaction_save" />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+
+            <p>
+              status: <strong>{reactionSummary?.status ?? '（未作成）'}</strong>
+              {' · '}
+              confidence: <strong>{reactionSummary?.confidence ?? '—'}</strong>
+              {' · '}
+              source_count: <strong>{reactionSummary?.source_count ?? 0}</strong>
+            </p>
+            <p class="hint">
+              generated_at: {reactionSummary?.generated_at ?? '—'}
+              {' · '}
+              reviewed_at: {reactionSummary?.reviewed_at ?? '—'}
+            </p>
+
+            <label>
+              要約（1行1項目。断定せず「〜という反応 / 傾向」表現）
+              <textarea
+                name="summary_bullets"
+                rows="5"
+                placeholder={'・週末は混雑したという反応が多めです\n・子ども連れでも楽しめたという声があります'}
+              >{reactionBulletsText}</textarea>
+            </label>
+
+            <fieldset class="reaction-signals">
+              <legend>signals</legend>
+              <label>
+                crowd_level
+                <select name="crowd_level">
+                  <option value="">（なし）</option>
+                  <option value="high" selected={reactionSignals.crowd_level === 'high'}>
+                    high
+                  </option>
+                  <option value="medium" selected={reactionSignals.crowd_level === 'medium'}>
+                    medium
+                  </option>
+                  <option value="low" selected={reactionSignals.crowd_level === 'low'}>
+                    low
+                  </option>
+                </select>
+              </label>
+              <label>
+                wait_time
+                <select name="wait_time">
+                  <option value="">（なし）</option>
+                  <option value="long" selected={reactionSignals.wait_time === 'long'}>
+                    long
+                  </option>
+                  <option value="medium" selected={reactionSignals.wait_time === 'medium'}>
+                    medium
+                  </option>
+                  <option value="short" selected={reactionSignals.wait_time === 'short'}>
+                    short
+                  </option>
+                </select>
+              </label>
+              <label class="check">
+                <input type="checkbox" name="signal_family" value="1" checked={reactionSignals.family === true} />
+                子ども向け (family)
+              </label>
+              <label class="check">
+                <input type="checkbox" name="signal_date" value="1" checked={reactionSignals.date === true} />
+                デート (date)
+              </label>
+              <label class="check">
+                <input type="checkbox" name="signal_solo" value="1" checked={reactionSignals.solo === true} />
+                一人向け (solo)
+              </label>
+              <label class="check">
+                <input type="checkbox" name="signal_photo" value="1" checked={reactionSignals.photo === true} />
+                写真映え (photo)
+              </label>
+              <label class="check">
+                <input type="checkbox" name="signal_rain" value="1" checked={reactionSignals.rain === true} />
+                雨の日 (rain)
+              </label>
+              <label>
+                recommended_time
+                <input
+                  type="text"
+                  name="recommended_time"
+                  value={reactionSignals.recommended_time ?? ''}
+                  placeholder="例: 夕方"
+                />
+              </label>
+            </fieldset>
+
+            <div class="form-row">
+              <label>
+                source_count
+                <input
+                  type="number"
+                  name="source_count"
+                  min="0"
+                  max="999"
+                  value={String(reactionSummary?.source_count ?? 0)}
+                />
+              </label>
+              <label>
+                confidence
+                <select name="confidence">
+                  <option value="low" selected={(reactionSummary?.confidence ?? 'low') === 'low'}>
+                    low
+                  </option>
+                  <option value="medium" selected={reactionSummary?.confidence === 'medium'}>
+                    medium
+                  </option>
+                  <option value="high" selected={reactionSummary?.confidence === 'high'}>
+                    high
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <label class="check">
+              <input type="checkbox" name="mark_reviewed" value="1" />
+              保存時に status=reviewed にする（published は維持）
+            </label>
+
+            <button type="submit">反応要約を保存</button>
+          </form>
+
+          <div class="reaction-actions">
+            <form method="post" action="/admin/events/" class="inline-form">
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <input type="hidden" name="intent" value="reaction_publish" />
+              <input type="hidden" name="event_id" value={String(event.id)} />
+              <button type="submit">Publish</button>
+            </form>
+            <form method="post" action="/admin/events/" class="inline-form">
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <input type="hidden" name="intent" value="reaction_hide" />
+              <input type="hidden" name="event_id" value={String(event.id)} />
+              <button type="submit">Hidden</button>
+            </form>
+          </div>
+
+          <h3>根拠ソース（内部確認用）</h3>
+          {
+            reactionSources.length === 0 ? (
+              <p class="hint">
+                ソースはまだありません。Phase 4A では SQL シードまたは将来の取得ジョブで追加します。
+              </p>
+            ) : (
+              <ul class="reaction-sources">
+                {reactionSources.map((src) => (
+                  <li>
+                    <strong>{src.source_type}</strong>
+                    {src.source_name ? ` · ${src.source_name}` : ''}
+                    {src.source_url && (
+                      <>
+                        {' · '}
+                        <a href={src.source_url} target="_blank" rel="noopener">
+                          URL
+                        </a>
+                      </>
+                    )}
+                    {src.observed_at && (
+                      <span class="hint"> · observed: {src.observed_at}</span>
+                    )}
+                    {src.excerpt_for_internal_review && (
+                      <p class="excerpt">{src.excerpt_for_internal_review}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+        </section>
+
         <div class="admin-panel">
           <h2>Visibility</h2>
           {isPublished && (
@@ -348,5 +585,73 @@ const isHidden = event?.status === 'hidden'
 
   .field-review-section h2 {
     margin-top: 0;
+  }
+
+  .reaction-section h2,
+  .reaction-section h3 {
+    margin-top: 0;
+  }
+
+  .reaction-form label {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .reaction-form textarea,
+  .reaction-form input[type='text'],
+  .reaction-form input[type='number'],
+  .reaction-form select {
+    display: block;
+    width: 100%;
+    max-width: 36rem;
+    margin-top: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    font-weight: 400;
+  }
+
+  .reaction-signals {
+    border: 1px solid #dbe3ea;
+    border-radius: 8px;
+    padding: 0.75rem 1rem 0.25rem;
+    margin: 0 0 1rem;
+    max-width: 36rem;
+  }
+
+  .reaction-signals legend {
+    font-weight: 700;
+    padding: 0 0.25rem;
+  }
+
+  .reaction-form label.check {
+    font-weight: 500;
+  }
+
+  .reaction-form label.check input {
+    display: inline;
+    width: auto;
+    margin-right: 0.4rem;
+  }
+
+  .reaction-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 0.75rem 0 1rem;
+  }
+
+  .reaction-sources {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+
+  .reaction-sources .excerpt {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.85rem;
+    color: #555;
+    background: #f6f8fa;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
   }
 </style>

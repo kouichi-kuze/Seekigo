@@ -10,6 +10,7 @@ import { processAdminFieldReviewPost } from './admin-field-review'
 import { processAdminEventEditPost } from './admin-event-edit'
 import { processAdminHidePost } from './admin-hide'
 import { processAdminDeletePost } from './admin-delete'
+import { processAdminReactionSummaryPost } from './admin-reaction-summary'
 
 type AdminCookies = {
   get: (name: string) => { value: string } | undefined
@@ -56,6 +57,14 @@ export async function processAdminPublishPost(opts: {
 
   if (intent === 'event_update') {
     return processAdminEventEditPost({ request, url, cookies, form })
+  }
+
+  if (
+    intent === 'reaction_save' ||
+    intent === 'reaction_publish' ||
+    intent === 'reaction_hide'
+  ) {
+    return processAdminReactionSummaryPost({ request, url, cookies, form })
   }
 
   if (intent === 'hide_event' || intent === 'unhide_event') {

@@ -6,8 +6,8 @@ interface Props {
 const { class: className } = Astro.props
 ---
 
-<span class:list={['wm', className]}>
-  <span class="wm__navy">Seek</span><span class="wm__i">i</span><span class="wm__go">go</span>
+<span class:list={['wm', className]} aria-label="Seekigo">
+  <span class="wm__navy" aria-hidden="true">Seek</span><span class="wm__i" aria-hidden="true">ı</span><span class="wm__go" aria-hidden="true">go</span>
 </span>
 
 <style>
@@ -25,17 +25,19 @@ const { class: className } = Astro.props
   .wm__go {
     color: var(--c-cyan);
   }
+  /* ドットなし ı + シアンの tittle（二重点を防ぐ） */
   .wm__i {
     position: relative;
+    display: inline-block;
   }
   .wm__i::after {
     content: '';
     position: absolute;
     left: 50%;
-    top: 0.06em;
-    width: 0.26em;
-    height: 0.26em;
-    margin-left: -0.13em;
+    top: 0.02em;
+    width: 0.22em;
+    height: 0.22em;
+    transform: translateX(-50%);
     background: var(--c-cyan);
     border-radius: 50%;
   }

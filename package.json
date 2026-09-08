@@ -22,6 +22,7 @@
     "dedupe:enjoytokyo": "tsx scripts/check-event-duplicates.ts",
     "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts",
     "import:walkerplus": "tsx scripts/import-walkerplus-supabase.ts",
+    "collect:reaction-web": "tsx scripts/collect-reaction-web.ts",
     "brand:export": "tsx scripts/export-brand-assets.ts"
   },
   "dependencies": {

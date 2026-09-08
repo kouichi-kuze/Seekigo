@@ -3,7 +3,6 @@ import Layout from '../layouts/Layout.astro'
 import { supabase } from '../lib/supabase'
 import EventCard from '../components/EventCard.astro'
 import SeekigoWordmark from '../components/brand/SeekigoWordmark.astro'
-import HeroDecor from '../components/brand/HeroDecor.astro'
 
 const { data: events, error } = await supabase
   .from('events')
@@ -24,6 +23,25 @@ if (error) {
 
     <!-- ─── Hero ─── -->
     <section class="hero">
+      <div class="hero__media" aria-hidden="true">
+        <picture>
+          <source
+            media="(min-width: 720px)"
+            srcset="/images/top/hero_seekigo_pc.webp"
+            type="image/webp"
+          />
+          <img
+            class="hero__img"
+            src="/images/top/hero_seekigo_sp.webp"
+            alt=""
+            width="1080"
+            height="1350"
+            decoding="async"
+            fetchpriority="high"
+          />
+        </picture>
+      </div>
+      <div class="hero__scrim" aria-hidden="true"></div>
       <div class="hero__inner inner">
         <div class="hero__copy">
           <p class="hero__brand">
@@ -53,9 +71,6 @@ if (error) {
           <button class="chip" data-filter="night">夜</button>
           <button class="chip chip--ghost" data-filter="all">すべて</button>
         </div>
-      </div>
-      <div class="hero-decor-slot">
-        <HeroDecor />
       </div>
     </section>
 
@@ -194,10 +209,42 @@ if (error) {
   /* ─── Hero ─── */
   .hero {
     position: relative;
-    background: var(--c-white);
+    isolation: isolate;
+    background: var(--c-navy, #0b1f3a);
     border-bottom: 1px solid var(--c-border);
     padding: 56px 0 48px;
     overflow: hidden;
+    min-height: min(72vh, 640px);
+    display: flex;
+    align-items: flex-end;
+  }
+  .hero__media {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+  .hero__media picture,
+  .hero__img {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .hero__img {
+    object-fit: cover;
+    object-position: center;
+  }
+  .hero__scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.72) 0%,
+        rgba(255, 255, 255, 0.55) 42%,
+        rgba(255, 255, 255, 0.28) 100%
+      );
   }
   .hero__inner {
     position: relative;
@@ -205,6 +252,7 @@ if (error) {
     display: flex;
     flex-direction: column;
     gap: 14px;
+    width: 100%;
   }
   .br-sp { display: none; }
 
@@ -260,7 +308,7 @@ if (error) {
     transform: translateY(-1px);
   }
   .hero-cta__secondary {
-    background: transparent;
+    background: rgba(255, 255, 255, 0.72);
     color: var(--c-navy) !important;
     border: 2px solid var(--c-navy);
   }
@@ -270,6 +318,21 @@ if (error) {
   }
 
   @media (min-width: 720px) {
+    .hero {
+      align-items: center;
+      min-height: min(78vh, 720px);
+      padding: 64px 0 56px;
+    }
+    .hero__scrim {
+      background:
+        linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0.88) 0%,
+          rgba(255, 255, 255, 0.72) 34%,
+          rgba(255, 255, 255, 0.28) 58%,
+          rgba(255, 255, 255, 0.08) 100%
+        );
+    }
     .hero__copy {
       max-width: min(58%, 34rem);
     }
@@ -277,7 +340,8 @@ if (error) {
 
   @media (min-width: 1024px) {
     .hero {
-      padding: 64px 0 56px;
+      padding: 72px 0 64px;
+      min-height: min(82vh, 780px);
     }
     .hero__copy {
       max-width: min(52%, 36rem);
@@ -287,6 +351,7 @@ if (error) {
   @media (max-width: 719px) {
     .hero {
       padding: 40px 0 36px;
+      min-height: min(70vh, 560px);
     }
     .hero__inner {
       gap: 12px;
@@ -308,7 +373,7 @@ if (error) {
   .chip {
     appearance: none;
     border: 2px solid var(--c-primary);
-    background: transparent;
+    background: rgba(255, 255, 255, 0.82);
     color: var(--c-primary);
     font-family: inherit;
     font-size: 15px;

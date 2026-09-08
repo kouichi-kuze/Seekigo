@@ -3,6 +3,8 @@ import Layout from '../../../layouts/Layout.astro'
 import { supabase } from '../../../lib/supabase'
 import { formatAreaLabel, formatEventDateRange, isEventEnded } from '../../../lib/display'
 import { resolveEventDisplayImage } from '../../../lib/event-image-usage'
+import EventReactionSummary from '../../../components/EventReactionSummary.astro'
+import { fetchPublishedReactionSummary } from '../../../lib/event-reaction-summary'
 
 export async function getStaticPaths() {
   const { data: events } = await supabase
@@ -56,6 +58,10 @@ const hasMeta = Boolean(
       event.address ||
       event.price_text),
 )
+
+const reactionSummary = event
+  ? await fetchPublishedReactionSummary(supabase, Number(event.id))
+  : null
 ---
 
 <Layout
@@ -181,6 +187,8 @@ const hasMeta = Boolean(
             </a>
           </p>
         )}
+
+        {reactionSummary && <EventReactionSummary summary={reactionSummary} />}
 
         <section class="organizer-note" aria-labelledby="organizer-note-heading">
           <h2 id="organizer-note-heading" class="organizer-note__heading">

@@ -1,0 +1,312 @@
+/**
+ * DEV admin: SNS・Web 反応要約の保存 / Publish / Hidden。
+ */
+import { createAdminClient } from './supabase-admin'
+import {
+  parsePositiveIntIds,
+  readAdminPostForm,
+  verifyAdminCsrf,
+} from './admin-security'
+import {
+  bulletsFromTextarea,
+  parseReactionSignals,
+  REACTION_CONFIDENCE_LEVELS,
+  REACTION_CROWD_LEVELS,
+  REACTION_WAIT_LEVELS,
+  type ReactionConfidence,
+  type ReactionCrowdLevel,
+  type ReactionSignals,
+  type ReactionWaitLevel,
+} from './event-reaction-summary'
+
+type AdminCookies = {
+  get: (name: string) => { value: string } | undefined
+}
+
+export type AdminReactionResult =
+  | { ok: true; redirectTo: string }
+  | { ok: false; message: string }
+
+function logReactionPost(
+  details: Record<string, string | number | boolean | null | undefined>,
+): void {
+  if (!import.meta.env.DEV) return
+  // 秘密情報・excerpt 本文は出さない
+  console.info('[admin/reaction-summary] POST', details)
+}
+
+function parseBoolFlag(form: FormData, name: string): boolean | null {
+  const raw = String(form.get(name) ?? '').trim()
+  if (raw === '1' || raw === 'true' || raw === 'on') return true
+  if (raw === '0' || raw === 'false') return false
+  // checkbox absent → false for editable flags (explicit off)
+  if (!form.has(name)) return false
+  return null
+}
+
+function readSignalsFromForm(form: FormData): ReactionSignals {
+  const crowdRaw = String(form.get('crowd_level') ?? '').trim()
+  const waitRaw = String(form.get('wait_time') ?? '').trim()
+  const crowd: ReactionCrowdLevel | null = (
+    REACTION_CROWD_LEVELS as readonly string[]
+  ).includes(crowdRaw)
+    ? (crowdRaw as ReactionCrowdLevel)
+    : null
+  const wait: ReactionWaitLevel | null = (
+    REACTION_WAIT_LEVELS as readonly string[]
+  ).includes(waitRaw)
+    ? (waitRaw as ReactionWaitLevel)
+    : null
+  const recommended = String(form.get('recommended_time') ?? '').trim()
+
+  return parseReactionSignals({
+    crowd_level: crowd,
+    family: parseBoolFlag(form, 'signal_family'),
+    date: parseBoolFlag(form, 'signal_date'),
+    solo: parseBoolFlag(form, 'signal_solo'),
+    photo: parseBoolFlag(form, 'signal_photo'),
+    rain: parseBoolFlag(form, 'signal_rain'),
+    wait_time: wait,
+    recommended_time: recommended || null,
+  })
+}
+
+function readConfidence(form: FormData): ReactionConfidence {
+  const raw = String(form.get('confidence') ?? 'low').trim()
+  return (REACTION_CONFIDENCE_LEVELS as readonly string[]).includes(raw)
+    ? (raw as ReactionConfidence)
+    : 'low'
+}
+
+export async function processAdminReactionSummaryPost(opts: {
+  request: Request
+  url: URL
+  cookies: AdminCookies
+  form?: FormData
+}): Promise<AdminReactionResult> {
+  const { request, url, cookies } = opts
+  const form = opts.form ?? (await readAdminPostForm(request))
+
+  const csrfCheck = verifyAdminCsrf({
+    formToken: String(form.get('csrf_token') ?? ''),
+    cookieToken: cookies.get('seekigo_admin_csrf')?.value,
+    request,
+    url,
+  })
+  if (!csrfCheck.ok) {
+    logReactionPost({
+      intent: String(form.get('intent') ?? ''),
+      ok: false,
+      reason: csrfCheck.reason,
+    })
+    return { ok: false, message: `Security check failed: ${csrfCheck.reason}` }
+  }
+
+  const intent = String(form.get('intent') ?? '')
+  const ids = parsePositiveIntIds(
+    [form.get('event_id')].filter(Boolean) as FormDataEntryValue[],
+  )
+  if (ids.length !== 1) {
+    logReactionPost({ intent, ok: false, reason: 'invalid_event_id' })
+    return { ok: false, message: 'Invalid event id' }
+  }
+  const eventId = ids[0]
+  const returnTo = `/admin/events/${eventId}/`
+  const admin = createAdminClient()
+
+  if (intent === 'reaction_publish' || intent === 'reaction_hide') {
+    const { data: existing, error } = await admin
+      .from('event_reaction_summaries')
+      .select('id, status, summary_bullets')
+      .eq('event_id', eventId)
+      .maybeSingle()
+    if (error) {
+      logReactionPost({
+        intent,
+        event_id: eventId,
+        ok: false,
+        update_result: 'error',
+        error: error.message,
+      })
+      return { ok: false, message: error.message }
+    }
+    if (!existing) {
+      logReactionPost({
+        intent,
+        event_id: eventId,
+        summary_id: null,
+        ok: false,
+        reason: 'summary_missing',
+      })
+      return { ok: false, message: '反応要約がまだありません。先に保存してください。' }
+    }
+    const bullets = Array.isArray(existing.summary_bullets)
+      ? existing.summary_bullets
+      : []
+    if (intent === 'reaction_publish' && bullets.length === 0) {
+      logReactionPost({
+        intent,
+        event_id: eventId,
+        summary_id: Number(existing.id),
+        ok: false,
+        reason: 'empty_bullets',
+      })
+      return { ok: false, message: '要約文が空のため Publish できません' }
+    }
+
+    const prevStatus = String(existing.status ?? 'draft')
+    const nextStatus = intent === 'reaction_publish' ? 'published' : 'hidden'
+    const patch: Record<string, unknown> = {
+      status: nextStatus,
+    }
+    if (intent === 'reaction_publish') {
+      patch.reviewed_at = new Date().toISOString()
+      patch.reviewed_by = 'local_admin'
+    }
+
+    const { error: upErr } = await admin
+      .from('event_reaction_summaries')
+      .update(patch)
+      .eq('event_id', eventId)
+    if (upErr) {
+      logReactionPost({
+        intent,
+        event_id: eventId,
+        summary_id: Number(existing.id),
+        status_change: `${prevStatus}->${nextStatus}`,
+        update_result: 'error',
+        error: upErr.message,
+      })
+      return { ok: false, message: upErr.message }
+    }
+
+    logReactionPost({
+      intent,
+      event_id: eventId,
+      summary_id: Number(existing.id),
+      status_change: `${prevStatus}->${nextStatus}`,
+      update_result: 'ok',
+    })
+
+    const flag = intent === 'reaction_publish' ? 'reaction_published' : 'reaction_hidden'
+    return { ok: true, redirectTo: `${returnTo}?${flag}=1` }
+  }
+
+  if (intent !== 'reaction_save') {
+    logReactionPost({ intent, event_id: eventId, ok: false, reason: 'invalid_intent' })
+    return { ok: false, message: 'Invalid reaction request' }
+  }
+
+  const bullets = bulletsFromTextarea(String(form.get('summary_bullets') ?? ''))
+  const signals = readSignalsFromForm(form)
+  const confidence = readConfidence(form)
+  const sourceCountRaw = Number(String(form.get('source_count') ?? '0'))
+  const sourceCount =
+    Number.isFinite(sourceCountRaw) && sourceCountRaw >= 0
+      ? Math.min(Math.floor(sourceCountRaw), 999)
+      : 0
+
+  const markReviewed = String(form.get('mark_reviewed') ?? '') === '1'
+  const now = new Date().toISOString()
+
+  const { data: existing, error: selErr } = await admin
+    .from('event_reaction_summaries')
+    .select('id, status')
+    .eq('event_id', eventId)
+    .maybeSingle()
+  if (selErr) {
+    logReactionPost({
+      intent,
+      event_id: eventId,
+      update_result: 'error',
+      error: selErr.message,
+    })
+    return { ok: false, message: selErr.message }
+  }
+
+  if (!existing) {
+    const nextStatus = markReviewed ? 'reviewed' : 'draft'
+    const { data: inserted, error: insErr } = await admin
+      .from('event_reaction_summaries')
+      .insert({
+        event_id: eventId,
+        summary_bullets: bullets,
+        signals,
+        source_count: sourceCount,
+        confidence,
+        status: nextStatus,
+        generated_at: now,
+        reviewed_at: markReviewed ? now : null,
+        reviewed_by: markReviewed ? 'local_admin' : null,
+      })
+      .select('id')
+      .maybeSingle()
+    if (insErr) {
+      logReactionPost({
+        intent,
+        event_id: eventId,
+        status_change: `null->${nextStatus}`,
+        update_result: 'error',
+        error: insErr.message,
+      })
+      return { ok: false, message: insErr.message }
+    }
+    logReactionPost({
+      intent,
+      event_id: eventId,
+      summary_id: inserted ? Number(inserted.id) : null,
+      status_change: `null->${nextStatus}`,
+      update_result: 'ok',
+      bullet_count: bullets.length,
+      signal_keys: Object.keys(signals).length,
+      source_count: sourceCount,
+      confidence,
+    })
+    return { ok: true, redirectTo: `${returnTo}?reaction_saved=1` }
+  }
+
+  const prevStatus = String(existing.status ?? 'draft')
+  const patch: Record<string, unknown> = {
+    summary_bullets: bullets,
+    signals,
+    source_count: sourceCount,
+    confidence,
+  }
+  let nextStatus = prevStatus
+  if (markReviewed && existing.status !== 'published') {
+    patch.status = 'reviewed'
+    patch.reviewed_at = now
+    patch.reviewed_by = 'local_admin'
+    nextStatus = 'reviewed'
+  }
+
+  const { error: upErr } = await admin
+    .from('event_reaction_summaries')
+    .update(patch)
+    .eq('event_id', eventId)
+  if (upErr) {
+    logReactionPost({
+      intent,
+      event_id: eventId,
+      summary_id: Number(existing.id),
+      status_change: `${prevStatus}->${nextStatus}`,
+      update_result: 'error',
+      error: upErr.message,
+    })
+    return { ok: false, message: upErr.message }
+  }
+
+  logReactionPost({
+    intent,
+    event_id: eventId,
+    summary_id: Number(existing.id),
+    status_change: `${prevStatus}->${nextStatus}`,
+    update_result: 'ok',
+    bullet_count: bullets.length,
+    signal_keys: Object.keys(signals).length,
+    source_count: sourceCount,
+    confidence,
+  })
+
+  return { ok: true, redirectTo: `${returnTo}?reaction_saved=1` }
+}

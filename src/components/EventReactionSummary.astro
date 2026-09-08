@@ -1,0 +1,126 @@
+---
+/**
+ * 公開イベント詳細: SNS・Web 反応要約（published のみ）。
+ * 第三者投稿本文は表示しない。
+ */
+import type { EventReactionSummaryRow } from '../lib/event-reaction-summary'
+import {
+  activeReactionSignalLabels,
+  formatReactionUpdatedAt,
+} from '../lib/event-reaction-summary'
+
+interface Props {
+  summary: EventReactionSummaryRow
+}
+
+const { summary } = Astro.props
+const tags = activeReactionSignalLabels(summary.signals)
+const updatedLabel = formatReactionUpdatedAt(
+  summary.reviewed_at ?? summary.generated_at ?? summary.updated_at,
+)
+const recommended = summary.signals.recommended_time?.trim() || null
+---
+
+<section class="reaction-summary" aria-labelledby="reaction-summary-heading">
+  <h2 id="reaction-summary-heading" class="reaction-summary__heading">
+    SNS・Web上の反応
+  </h2>
+  <p class="reaction-summary__note">
+    公開情報から見える傾向の要約です。個人の投稿を転載したものではありません。
+  </p>
+
+  {
+    tags.length > 0 && (
+      <ul class="reaction-summary__tags" aria-label="反応の傾向タグ">
+        {tags.map((label) => (
+          <li>{label}</li>
+        ))}
+      </ul>
+    )
+  }
+
+  <ul class="reaction-summary__list">
+    {
+      summary.summary_bullets.map((bullet) => (
+        <li>{bullet}</li>
+      ))
+    }
+  </ul>
+
+  {
+    recommended && (
+      <p class="reaction-summary__time">
+        行きやすい時間帯の傾向: {recommended}
+      </p>
+    )
+  }
+
+  {
+    updatedLabel && (
+      <p class="reaction-summary__updated">最終更新: {updatedLabel}</p>
+    )
+  }
+</section>
+
+<style>
+  .reaction-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 0 4px;
+    border-top: 1px solid var(--c-border);
+  }
+
+  .reaction-summary__heading {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--c-navy);
+  }
+
+  .reaction-summary__note {
+    margin: 0;
+    font-size: 13px;
+    color: var(--c-muted);
+    line-height: 1.6;
+  }
+
+  .reaction-summary__tags {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .reaction-summary__tags li {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--c-navy);
+    border: 1px solid var(--c-border);
+    background: var(--c-bg);
+    padding: 4px 10px;
+    border-radius: var(--r-sm);
+  }
+
+  .reaction-summary__list {
+    margin: 0;
+    padding: 0 0 0 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .reaction-summary__list li {
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--c-text);
+  }
+
+  .reaction-summary__time,
+  .reaction-summary__updated {
+    margin: 0;
+    font-size: 13px;
+    color: var(--c-muted);
+  }
+</style>
