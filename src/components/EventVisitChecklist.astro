@@ -1,0 +1,81 @@
+---
+/**
+ * 公開イベント詳細: 「行く前チェック」タグ。
+ * yes / 確定事実のみ。unknown・no・null は出さない。
+ */
+import {
+  buildVisitChecklistTags,
+  type VisitDisplayEvent,
+} from '../lib/event-visit-display'
+import { buildVisitChecklistTagsEn, EVENT_UI_EN } from '../lib/i18n/event-en'
+import type { SiteLocale } from '../lib/i18n/locale'
+
+interface Props {
+  event: VisitDisplayEvent
+  locale?: SiteLocale
+}
+
+const { event, locale = 'ja' } = Astro.props
+const tags =
+  locale === 'en'
+    ? buildVisitChecklistTagsEn(event)
+    : buildVisitChecklistTags(event)
+const heading = locale === 'en' ? EVENT_UI_EN.beforeYouGo : '行く前チェック'
+---
+
+{
+  tags.length > 0 && (
+    <section class="visit-check" aria-labelledby="visit-check-heading">
+      <h2 id="visit-check-heading" class="visit-check__heading">
+        {heading}
+      </h2>
+      <ul class="visit-check__tags">
+        {tags.map((tag) => (
+          <li>
+            <span class="visit-check__tag">{tag.label}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+<style>
+  .visit-check {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .visit-check__heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--c-text);
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--c-primary);
+    align-self: flex-start;
+  }
+
+  .visit-check__tags {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .visit-check__tag {
+    display: inline-flex;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--c-navy, #0e2744);
+    background: color-mix(in srgb, var(--c-cyan, #00a3ff) 12%, #fff);
+    border: 1px solid color-mix(in srgb, var(--c-cyan, #00a3ff) 28%, #e2e8f0);
+    border-radius: var(--r-sm, 6px);
+    padding: 6px 12px;
+    line-height: 1.3;
+  }
+</style>

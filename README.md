@@ -274,49 +274,196 @@ Publish
 | `npm run import:enjoytokyo` | EnjoyTokyo import |
 | `npm run enrich:enjoytokyo:ai` | EnjoyTokyo AI enrichment |
 | `npm run import:walkerplus` | Walkerplus 手動 import |
-| `npm run collect:reaction-web` | Web/RSS 反応ソース収集（PoC） |
-| `npm run collect:reaction-x` | X Recent Search 反応ソース収集（PoC） |
-| `npm run summarize:reaction` | SNS・Web 反応の AI 要約（draft・PoC） |
+| `npm run collect:reaction-web` | Web/RSS 反応ソース収集（手動・1イベント） |
+| `npm run collect:reaction-x` | X Recent Search 反応ソース収集（手動・1イベント） |
+| `npm run summarize:reaction` | SNS・Web 反応の AI 要約（draft） |
+| `npm run enrich:event-visit` | visit attrs 自動補完（公式サイト優先・draft/review） |
+| `npm run translate:event` | イベント自由文の英訳 draft |
 | `npm run brand:export` | brand / OGP PNG 書き出し（任意・build 非連動） |
 
-### X 反応収集（Phase 4B-2 PoC）
+---
+
+## Phase 4 Operations（Reaction / Visit / Maps / English）
+
+Phase 4 は **手動運用で v1 を検証**する方針です。  
+X / AI要約 / visit enrich / 翻訳の **cron 自動化は導入しません**（費用・精度確認後に次フェーズ）。  
+既存の event sync GitHub Actions は変更しません。
+
+### Reaction architecture
+
+```text
+collect:reaction-web / collect:reaction-x
+  → event_reaction_sources（内部確認用・公開非表示）
+  → summarize:reaction（OpenAI・低コスト）
+  → event_reaction_summaries status=draft
+  → admin 人が確認 → Publish
+  → 公開「みんなの反応」（published + bullets のみ）
+```
+
+公開に出さないもの:
+
+- reaction source 本文 / excerpt
+- X username / post URL
+- draft / hidden の要約
+
+### X collection rules（Phase 4 確定）
+
+実行単位: **1イベント**（`REACTION_EVENT_ID` 必須）。全イベント一括は実装しない。
+
+当面の対象（手動選択）:
+
+- `published`
+- **開催中**（開催前・終了後は原則検索しない）
+- 口コミ需要が高いイベント
+
+取得:
+
+| 項目 | 値 |
+|------|-----|
+| 初回 | 20 Post |
+| 有効口コミ | exact / likely かつ反応用途として利用価値あり |
+| 有効 < 10 | 追加 10 Post |
+| 最大取得 | **30 Post / run** |
+| 保存上限 | **20 X sources / event** |
+
+保存目標内訳（不足を無理に埋めない）:
+
+- experience ≤ 12
+- official ≤ 2
+- media ≤ 2
+- other ≤ 4
+
+20 件到達後: Phase 4 では **新規保存停止**（入れ替えは将来フェーズ）。
 
 ```powershell
-# .env に X_BEARER_TOKEN=... （PUBLIC_ 禁止・commit 禁止）
-$env:REACTION_EVENT_ID="2"
+$env:REACTION_EVENT_ID="42"
 $env:DRY_RUN="true"
-$env:X_MAX_RESULTS="10"
 npm run collect:reaction-x
 ```
 
-- Endpoint: `GET https://api.x.com/2/tweets/search/recent`（公式のみ）
-- 既定は DRY_RUN（DB 非書き込み）。Post 全文の公開転載はしない
-- PoC の Post read 単価はコード内 `X_POST_READ_COST_USD`（現状 $0.005）。**X の料金は変更される可能性があるため公式を確認**
+- `DRY_RUN` 既定は `true`（未設定でも安全）
+- Endpoint: `GET https://api.x.com/2/tweets/search/recent` のみ
+- 無制限 pagination なし
+- estimated Post read cost をログ出力
+- **X 料金は変更されるため [Developer Console](https://developer.x.com/) で確認。自動チャージ前提にしない**
+- 秘密: `X_BEARER_TOKEN`（`PUBLIC_` 禁止・commit 禁止）
 
-### 反応 AI 要約（Phase 4B-3 PoC）
+### AI summary flow + quality guard
 
 ```powershell
-# .env に OPENAI_API_KEY=... （PUBLIC_ 禁止・commit 禁止）
-# 1) input 確認のみ（API なし）
 $env:REACTION_EVENT_ID="42"
 $env:DRY_RUN="true"
-$env:AI_DRY_RUN_NO_API="true"
+$env:AI_DRY_RUN_NO_API="true"   # input 確認のみ
 npm run summarize:reaction
 
-# 2) OpenAI 1回・DB 非書き込み
-$env:AI_DRY_RUN_NO_API="false"
-$env:DRY_RUN="true"
+$env:AI_DRY_RUN_NO_API="false"  # OpenAI 1回・DB 非書き込み
 npm run summarize:reaction
 
-# 3) draft へ保存（確認後）
-$env:DRY_RUN="false"
+$env:DRY_RUN="false"            # draft 保存（確認後）
 npm run summarize:reaction
 ```
 
-- 既定モデル: `gpt-4.1-nano`（`OPENAI_REACTION_MODEL` で上書き可）
-- 生成後は `status=draft`。**自動 Publish しない**
-- 公開ページは `published` かつ bullets があるときのみ表示
-- **AI 料金は変更される可能性があるため、[OpenAI Platform Usage](https://platform.openai.com/usage) で実費を確認**
+- 既定モデル: `gpt-4.1-nano`（`OPENAI_REACTION_MODEL`）
+- ソース **3件未満は AI を呼ばない**
+- 生成は常に **draft**。自動 Publish しない
+- published / hidden は `REACTION_FORCE` / admin force なしで上書きしない
+- quality guard: theme 優先・peripheral 除外・断定の緩和・confidence
+- token / estimated cost をログ
+
+### Visit attrs + enrichment
+
+公開詳細（JA）:
+
+- 料金 / 無料有料 / 予約 / 最寄駅 / 徒歩 / access 補足
+- venue_type / family·date·solo·rain friendly（yes のみ表示）
+- age / duration / parking
+- null / unknown は行ごと非表示（UI を壊さない）
+
+```powershell
+$env:EVENT_ID="42"
+$env:DRY_RUN="true"
+npm run enrich:event-visit
+```
+
+- official_url 優先（Walkerplus listing URL は自動 fetch しない）
+- JSON-LD + deterministic + 任意 AI assist
+- **published / hidden は本体直更新しない** → `event_field_reviews`
+- draft かつ high confidence のみ本体へ慎重適用
+- Accept / Reject は admin Field Review
+
+#### `family_friendly` 正式方針
+
+- **イベント属性**（reaction `signals.family` とは別）
+- 自動 `yes` の根拠のみ:
+  1. 公式の子ども / ファミリー向け明記
+  2. 親子 / キッズ等の明示
+  3. 対象年齢の明示
+  4. category `kids` は **単独では yes にしない**（公式文言との整合が必要）
+- キャラクター名・ブランド名・AI推測だけでは yes にしない
+- `no` は原則自動設定しない
+- 不明は `unknown`
+
+### Maps
+
+- `latitude` / `longitude` 優先、なければ `address`
+- Google Maps 検索 URL / 現在地からのルート URL を生成
+- **Seekigo は Geolocation API を使わない**（起点は Maps 側）
+- 自宅住所を保存しない
+- Embed API key（`PUBLIC_GOOGLE_MAPS_EMBED_API_KEY`）は任意。未設定時はリンク中心
+
+### English event pages + translation
+
+- 公開: `/en/tokyo/event/[slug]/`（構造値は固定 EN 辞書）
+- 自由文: `event_translations` の **published のみ**
+- 反応英訳: `event_reaction_summary_translations`（**JA published bullets の英訳**。raw X から英語要約を別生成しない）
+- hreflang / canonical / sitemap / **JP \| EN** ヘッダー切替（詳細ページのみ）
+- title 未翻訳時は JA title fallback（`lang=ja`）。他自由文は非表示
+
+```powershell
+$env:EVENT_ID="42"
+$env:LOCALE="en"
+$env:DRY_RUN="true"
+$env:TRANSLATE_REACTION="true"
+npm run translate:event
+```
+
+- 既定モデル: `gpt-4.1-nano`（`OPENAI_TRANSLATE_MODEL`）
+- AI → **draft** → admin 確認 → Publish
+- published / hidden は force なしで上書きしない
+
+### Admin workflow（DEV のみ）
+
+`/admin/events/[id]/`
+
+- 日本語 label + 英語 key 補助
+- visit attrs / field reviews / reaction / translations / image / status / Danger Zone
+
+本番 SSG では admin 編集ページを生成しません。sitemap からも `/admin` `/dev` を除外します。
+
+### Cost / safety notes
+
+| 項目 | 方針 |
+|------|------|
+| OpenAI | 低コストモデル・draft のみ・token/cost ログ・自動 Publish 禁止 |
+| X | 1イベント・最大30取得・DRY_RUN 既定・料金は Console で確認 |
+| Secrets | `OPENAI_API_KEY` / `X_BEARER_TOKEN` / service role は server only（`PUBLIC_` 禁止） |
+| Automation | Phase 4 では cron なし（手動検証） |
+
+### Migrations（手動・Supabase SQL Editor）
+
+勝手に本番へ適用しない。コードが期待する主な SQL:
+
+| ファイル | 内容 |
+|----------|------|
+| `scripts/create-event-reaction-summaries.sql` + `grant-event-reaction-summaries.sql` | 反応要約 / ソース + RLS |
+| `scripts/migrate-event-reaction-source-types.sql` | source_type 拡張 |
+| `scripts/migrate-event-reaction-sources-url-index.sql` | URL index（推奨） |
+| `scripts/migrate-event-visit-attrs.sql` | visit attrs カラム |
+| `scripts/create-event-translations.sql` + `grant-event-translations.sql` | 英訳テーブル + RLS |
+| `scripts/create-event-field-reviews.sql` + `grant-event-field-reviews.sql` | field review（Phase 3〜） |
+| `scripts/migrate-add-hidden-status.sql` | hidden 保護の前提 |
+
+---
 
 ### GO TOKYO
 
@@ -439,7 +586,9 @@ Data
 - Event 一覧
 - Draft 確認 / 一括 Publish
 - `image_usage_status` 一括変更
-- 個別イベント編集
+- 個別イベント編集（visit attrs / 日本語 label）
+- SNS・Web 反応（draft / Publish / Hidden / AI 生成）
+- 英語翻訳（draft / Publish / Hidden / AI 生成）
 - Hidden / Published 切替
 - 重複候補レビュー
 - Field Review 承認 / 却下

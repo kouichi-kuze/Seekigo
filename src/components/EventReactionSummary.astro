@@ -2,31 +2,63 @@
 /**
  * 公開イベント詳細: 「みんなの反応」（published + bullets のみ）。
  * X投稿本文 / excerpt / username / source_url は一切表示しない。
+ * EN: published English reaction translation bullets がある場合のみ表示。
  */
 import type { EventReactionSummaryRow } from '../lib/event-reaction-summary'
 import {
   formatReactionUpdatedAt,
   publicReactionSignalLabels,
 } from '../lib/event-reaction-summary'
+import type { SiteLocale } from '../lib/i18n/locale'
+import { EVENT_UI_EN } from '../lib/i18n/event-en'
 
 interface Props {
   summary: EventReactionSummaryRow
+  locale?: SiteLocale
+  /** EN published bullets — required for locale=en */
+  bulletsEn?: string[] | null
 }
 
-const { summary } = Astro.props
+const { summary, locale = 'ja', bulletsEn = null } = Astro.props
 
-const bullets = (summary.summary_bullets ?? [])
+const bulletsJa = (summary.summary_bullets ?? [])
   .map((b) => String(b ?? '').trim())
   .filter(Boolean)
   .slice(0, 5)
 
+const bulletsEnClean = (bulletsEn ?? [])
+  .map((b) => String(b ?? '').trim())
+  .filter(Boolean)
+  .slice(0, 5)
+
+const bullets = locale === 'en' ? bulletsEnClean : bulletsJa
 const showSection = bullets.length > 0
-const tags = publicReactionSignalLabels(summary.signals)
-const recommended = summary.signals.recommended_time?.trim() || null
+
+const tags = locale === 'ja' ? publicReactionSignalLabels(summary.signals) : []
+const recommended =
+  locale === 'ja' ? summary.signals.recommended_time?.trim() || null : null
 const showLowSourceNote = summary.source_count > 0 && summary.source_count < 10
 const updatedLabel = formatReactionUpdatedAt(
   summary.reviewed_at ?? summary.generated_at ?? summary.updated_at,
 )
+
+const heading =
+  locale === 'en' ? EVENT_UI_EN.reactions : 'みんなの反応'
+const kicker =
+  locale === 'en'
+    ? 'Based on public SNS and web posts'
+    : 'SNS・Web上の公開情報から'
+const provenance =
+  locale === 'en'
+    ? 'Summarized from publicly available SNS and web information.'
+    : 'SNS・Web上の公開情報をもとに要約しています。'
+const caution =
+  locale === 'en'
+    ? 'With few posts, treat these tendencies as reference only.'
+    : '投稿数が少ないため、傾向は参考情報としてご覧ください。'
+const updatedPrefix = locale === 'en' ? 'Updated: ' : '更新: '
+const recommendedLabel =
+  locale === 'en' ? 'Suggested time of day' : 'おすすめの時間帯'
 ---
 
 {
@@ -34,9 +66,9 @@ const updatedLabel = formatReactionUpdatedAt(
     <section class="reaction-summary" aria-labelledby="reaction-summary-heading">
       <header class="reaction-summary__header">
         <h2 id="reaction-summary-heading" class="reaction-summary__heading">
-          みんなの反応
+          {heading}
         </h2>
-        <p class="reaction-summary__kicker">SNS・Web上の公開情報から</p>
+        <p class="reaction-summary__kicker">{kicker}</p>
       </header>
 
       {
@@ -60,26 +92,25 @@ const updatedLabel = formatReactionUpdatedAt(
       {
         recommended && (
           <p class="reaction-summary__time">
-            <span class="reaction-summary__time-label">おすすめの時間帯</span>
+            <span class="reaction-summary__time-label">{recommendedLabel}</span>
             <span class="reaction-summary__time-value">{recommended}</span>
           </p>
         )
       }
 
       <footer class="reaction-summary__footer">
-        <p class="reaction-summary__provenance">
-          SNS・Web上の公開情報をもとに要約しています。
-        </p>
+        <p class="reaction-summary__provenance">{provenance}</p>
         {
           showLowSourceNote && (
-            <p class="reaction-summary__caution">
-              投稿数が少ないため、傾向は参考情報としてご覧ください。
-            </p>
+            <p class="reaction-summary__caution">{caution}</p>
           )
         }
         {
           updatedLabel && (
-            <p class="reaction-summary__updated">更新: {updatedLabel}</p>
+            <p class="reaction-summary__updated">
+              {updatedPrefix}
+              {updatedLabel}
+            </p>
           )
         }
       </footer>

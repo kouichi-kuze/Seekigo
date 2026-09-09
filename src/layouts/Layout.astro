@@ -1,7 +1,9 @@
 ---
 import GoogleAnalytics from '../components/GoogleAnalytics.astro'
 import SeekigoLogo from '../components/brand/SeekigoLogo.astro'
+import LanguageSwitcher from '../components/LanguageSwitcher.astro'
 import { BRAND_ASSETS, OG_IMAGE_SIZE } from '../lib/brand'
+import type { SiteLocale } from '../lib/i18n/locale'
 
 interface Props {
   title: string
@@ -12,9 +14,31 @@ interface Props {
   robots?: string
   /** 省略時はサイト共通 OGP。絶対 URL またはサイト相対パス */
   ogImage?: string
+  /** html lang / og:locale（default ja） */
+  locale?: SiteLocale
+  /** hreflang alternate パス（サイト相対、例: /tokyo/event/x/） */
+  hreflangAlternates?: { lang: string; path: string }[]
+  /**
+   * Event detail only: show JP|EN header switcher.
+   * Omit on list/TOP pages.
+   */
+  eventLanguageSwitcher?: {
+    slug: string
+    enPageAvailable?: boolean
+    jaPageAvailable?: boolean
+  }
 }
 
-const { title, description, noindex = false, robots, ogImage } = Astro.props
+const {
+  title,
+  description,
+  noindex = false,
+  robots,
+  ogImage,
+  locale = 'ja',
+  hreflangAlternates = [],
+  eventLanguageSwitcher,
+} = Astro.props
 
 /** ビルド／描画時点の西暦（毎年手更新不要） */
 const copyrightYear = new Date().getFullYear()
@@ -30,12 +54,22 @@ function toAbsoluteAsset(pathOrUrl: string): string {
   return pathOrUrl
 }
 
+function toAbsolutePath(path: string): string | undefined {
+  if (!Astro.site) return undefined
+  return new URL(path, Astro.site).href
+}
+
 const resolvedOgImage = toAbsoluteAsset(ogImage ?? BRAND_ASSETS.ogImage)
 const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
+const htmlLang = locale === 'en' ? 'en' : 'ja'
+const ogLocale = locale === 'en' ? 'en_US' : 'ja_JP'
+const ogImageAlt =
+  locale === 'en' ? 'Seekigo — Find it. Go.' : 'Seekigo — 探して、行く。'
+const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
 ---
 
 <!doctype html>
-<html lang="ja">
+<html lang={htmlLang}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -45,8 +79,16 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
     {description && <meta name="description" content={description} />}
     {robotsContent && <meta name="robots" content={robotsContent} />}
     {canonical && <link rel="canonical" href={canonical} />}
+    {
+      hreflangAlternates.map((alt) => {
+        const href = toAbsolutePath(alt.path)
+        return href ? (
+          <link rel="alternate" hreflang={alt.lang} href={href} />
+        ) : null
+      })
+    }
     <meta property="og:site_name" content="Seekigo" />
-    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:locale" content={ogLocale} />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     {description && <meta property="og:description" content={description} />}
@@ -54,7 +96,7 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
     <meta property="og:image" content={resolvedOgImage} />
     <meta property="og:image:width" content={String(OG_IMAGE_SIZE.width)} />
     <meta property="og:image:height" content={String(OG_IMAGE_SIZE.height)} />
-    <meta property="og:image:alt" content="Seekigo — 探して、行く。" />
+    <meta property="og:image:alt" content={ogImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     {description && <meta name="twitter:description" content={description} />}
@@ -65,13 +107,37 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
     <header class="site-header">
       <div class="inner">
         <SeekigoLogo size="header" />
-        <nav class="site-nav" aria-label="主要ナビ">
-          <a href="/tokyo/">東京</a>
-          <a href="/tokyo/today/" class="site-nav__today">今日</a>
-          <a href="/tokyo/this-weekend/" class="site-nav__extra">今週末</a>
-          <a href="/tokyo/free/" class="site-nav__extra">無料</a>
-          <a href="/tokyo/with-kids/" class="site-nav__extra">子どもと</a>
-        </nav>
+        <div class="site-header__end">
+          {
+            locale === 'en' ? (
+              <nav class="site-nav" aria-label={navLabel}>
+                <a href="/tokyo/">Tokyo</a>
+                <a href="/tokyo/today/" class="site-nav__today">Today</a>
+                <a href="/tokyo/this-weekend/" class="site-nav__extra">This weekend</a>
+                <a href="/tokyo/free/" class="site-nav__extra">Free</a>
+                <a href="/tokyo/with-kids/" class="site-nav__extra">With kids</a>
+              </nav>
+            ) : (
+              <nav class="site-nav" aria-label={navLabel}>
+                <a href="/tokyo/">東京</a>
+                <a href="/tokyo/today/" class="site-nav__today">今日</a>
+                <a href="/tokyo/this-weekend/" class="site-nav__extra">今週末</a>
+                <a href="/tokyo/free/" class="site-nav__extra">無料</a>
+                <a href="/tokyo/with-kids/" class="site-nav__extra">子どもと</a>
+              </nav>
+            )
+          }
+          {
+            eventLanguageSwitcher && (
+              <LanguageSwitcher
+                slug={eventLanguageSwitcher.slug}
+                currentLocale={locale}
+                enPageAvailable={eventLanguageSwitcher.enPageAvailable}
+                jaPageAvailable={eventLanguageSwitcher.jaPageAvailable}
+              />
+            )
+          }
+        </div>
       </div>
     </header>
 
@@ -157,6 +223,15 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
     min-width: 0;
   }
 
+  .site-header__end {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
   .site-nav {
     display: flex;
     align-items: center;
@@ -187,6 +262,9 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
 
   /* SPでは主要2項目のみ（既存レイアウトを壊さない） */
   @media (max-width: 719px) {
+    .site-header__end {
+      gap: 8px;
+    }
     .site-nav {
       gap: 10px;
     }
@@ -199,6 +277,9 @@ const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
   }
 
   @media (min-width: 720px) {
+    .site-header__end {
+      gap: 14px;
+    }
     .site-nav {
       gap: 18px;
     }

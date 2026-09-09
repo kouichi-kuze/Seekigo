@@ -3,11 +3,22 @@
  * - sync は差分検知のみ（本体非変更）
  * - summary は AI 再生成ノイズのため対象外
  * - title / image_* / slug / status も対象外
+ * - Phase 4C-1: visit attrs を allowlist に追加
  */
 import { createHash } from 'node:crypto'
 import { cleanAddressAccess } from './event-field-rules'
 import { normalizeHmToDb } from './event-time-rules'
 import { normalizeUrl, normalizeVenue } from './event-dedupe'
+import {
+  FRIENDLY_VALUES,
+  PARKING_STATUSES,
+  RESERVATION_STATUSES,
+  VENUE_TYPES,
+  type FriendlyValue,
+  type ParkingStatus,
+  type ReservationStatus,
+  type VenueType,
+} from './event-visit-attrs'
 
 /** sync / admin でレビュー可能なフィールド（明示マップ） */
 export const REVIEWABLE_FIELD_NAMES = [
@@ -20,8 +31,27 @@ export const REVIEWABLE_FIELD_NAMES = [
   'address',
   'price_text',
   'is_free',
+  'price_min',
+  'price_max',
   'category',
   'official_url',
+  'reservation_status',
+  'reservation_url',
+  'nearest_station',
+  'access_text',
+  'walk_minutes',
+  'latitude',
+  'longitude',
+  'venue_type',
+  'family_friendly',
+  'date_friendly',
+  'solo_friendly',
+  'rain_friendly',
+  'age_note',
+  'duration_minutes_min',
+  'duration_minutes_max',
+  'parking_status',
+  'parking_text',
 ] as const
 
 export type ReviewableFieldName = (typeof REVIEWABLE_FIELD_NAMES)[number]
@@ -39,19 +69,9 @@ export const SUMMARY_EXCLUDED_FROM_FIELD_REVIEW = true
 export const REVIEWABLE_FIELD_COLUMN: Record<
   ReviewableFieldName,
   ReviewableFieldName
-> = {
-  start_date: 'start_date',
-  end_date: 'end_date',
-  start_time: 'start_time',
-  end_time: 'end_time',
-  venue: 'venue',
-  area: 'area',
-  address: 'address',
-  price_text: 'price_text',
-  is_free: 'is_free',
-  category: 'category',
-  official_url: 'official_url',
-}
+> = Object.fromEntries(
+  REVIEWABLE_FIELD_NAMES.map((f) => [f, f]),
+) as Record<ReviewableFieldName, ReviewableFieldName>
 
 export type FieldSnapshot = {
   start_date?: string | null
@@ -63,8 +83,27 @@ export type FieldSnapshot = {
   address?: string | null
   price_text?: string | null
   is_free?: boolean | null
+  price_min?: number | null
+  price_max?: number | null
   category?: string[] | null
   official_url?: string | null
+  reservation_status?: ReservationStatus | null
+  reservation_url?: string | null
+  nearest_station?: string | null
+  access_text?: string | null
+  walk_minutes?: number | null
+  latitude?: number | null
+  longitude?: number | null
+  venue_type?: VenueType | null
+  family_friendly?: FriendlyValue | null
+  date_friendly?: FriendlyValue | null
+  solo_friendly?: FriendlyValue | null
+  rain_friendly?: FriendlyValue | null
+  age_note?: string | null
+  duration_minutes_min?: number | null
+  duration_minutes_max?: number | null
+  parking_status?: ParkingStatus | null
+  parking_text?: string | null
 }
 
 export type FieldDiff = {
@@ -88,7 +127,6 @@ function normalizeDateYmd(value: unknown): string | null {
   if (value == null) return null
   const s = String(value).trim()
   if (!s) return null
-  // Postgres date / ISO date
   const m = s.match(/^(\d{4}-\d{2}-\d{2})/)
   return m ? m[1] : null
 }
@@ -123,6 +161,30 @@ function normalizeAreaSlug(value: unknown): string | null {
   return s || null
 }
 
+function normalizeInt(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null
+  return n
+}
+
+function normalizeNum(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return null
+  return n
+}
+
+function normalizeEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  if (!s) return null
+  return (allowed as readonly string[]).includes(s) ? (s as T) : null
+}
+
 /** 比較キー（正規化後）。表示用とは別に使う */
 export function normalizeFieldForCompare(
   field: ReviewableFieldName,
@@ -134,9 +196,7 @@ export function normalizeFieldForCompare(
       return normalizeDateYmd(value)
     case 'start_time':
     case 'end_time':
-      return normalizeHmToDb(
-        value == null ? null : String(value),
-      )
+      return normalizeHmToDb(value == null ? null : String(value))
     case 'venue': {
       const v = normalizeVenue(value == null ? null : String(value))
       return v || null
@@ -148,7 +208,6 @@ export function normalizeFieldForCompare(
         value == null ? null : String(value),
       )
       if (!cleaned) return null
-      // 比較: NFKC + 空白（venue ほど攻撃的ではない）
       return (
         cleaned
           .normalize('NFKC')
@@ -158,14 +217,39 @@ export function normalizeFieldForCompare(
       )
     }
     case 'price_text':
+    case 'nearest_station':
+    case 'access_text':
+    case 'age_note':
+    case 'parking_text':
       return normalizeWhitespaceText(value)
     case 'is_free':
       if (value === true || value === false) return value
       return null
+    case 'price_min':
+    case 'price_max':
+    case 'walk_minutes':
+    case 'duration_minutes_min':
+    case 'duration_minutes_max':
+      return normalizeInt(value)
+    case 'latitude':
+    case 'longitude':
+      return normalizeNum(value)
     case 'category':
       return normalizeCategory(value)
     case 'official_url':
+    case 'reservation_url':
       return normalizeUrl(value == null ? null : String(value))
+    case 'reservation_status':
+      return normalizeEnum(value, RESERVATION_STATUSES)
+    case 'venue_type':
+      return normalizeEnum(value, VENUE_TYPES)
+    case 'family_friendly':
+    case 'date_friendly':
+    case 'solo_friendly':
+    case 'rain_friendly':
+      return normalizeEnum(value, FRIENDLY_VALUES)
+    case 'parking_status':
+      return normalizeEnum(value, PARKING_STATUSES)
     default:
       return null
   }
@@ -193,17 +277,42 @@ export function normalizeFieldForStorage(
     case 'address':
       return cleanAddressAccess(value == null ? null : String(value))
     case 'price_text':
+    case 'nearest_station':
+    case 'access_text':
+    case 'age_note':
+    case 'parking_text':
       return normalizeWhitespaceText(value)
     case 'is_free':
       if (value === true || value === false) return value
       return null
+    case 'price_min':
+    case 'price_max':
+    case 'walk_minutes':
+    case 'duration_minutes_min':
+    case 'duration_minutes_max':
+      return normalizeInt(value)
+    case 'latitude':
+    case 'longitude':
+      return normalizeNum(value)
     case 'category':
       return normalizeCategory(value)
-    case 'official_url': {
+    case 'official_url':
+    case 'reservation_url': {
       if (value == null) return null
       const s = String(value).trim()
       return s || null
     }
+    case 'reservation_status':
+      return normalizeEnum(value, RESERVATION_STATUSES)
+    case 'venue_type':
+      return normalizeEnum(value, VENUE_TYPES)
+    case 'family_friendly':
+    case 'date_friendly':
+    case 'solo_friendly':
+    case 'rain_friendly':
+      return normalizeEnum(value, FRIENDLY_VALUES)
+    case 'parking_status':
+      return normalizeEnum(value, PARKING_STATUSES)
     default:
       return null
   }
@@ -221,7 +330,8 @@ export function fieldValuesEqual(
   if (field === 'category') {
     return JSON.stringify(na) === JSON.stringify(nb)
   }
-  if (field === 'is_free') return na === nb
+  if (typeof na === 'number' && typeof nb === 'number') return na === nb
+  if (typeof na === 'boolean' && typeof nb === 'boolean') return na === nb
   return na === nb
 }
 
@@ -250,7 +360,6 @@ export function hashProposedValue(
   field: ReviewableFieldName,
   proposedStorage: unknown,
 ): string {
-  // 比較キー基準で hash（表記ゆれで増殖しない）
   const key = normalizeFieldForCompare(field, proposedStorage)
   const payload = `${field}:${canonicalJson(key)}`
   return createHash('sha256').update(payload, 'utf8').digest('hex')
@@ -274,7 +383,6 @@ export function computeFieldDiffs(
     const curStore = normalizeFieldForStorage(field, curRaw)
     const propStore = normalizeFieldForStorage(field, propRaw)
 
-    // proposed が実質 null → 自動 review しない
     const propCompare = normalizeFieldForCompare(field, propStore)
     if (propCompare === null || propCompare === undefined) {
       continue

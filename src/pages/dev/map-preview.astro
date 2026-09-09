@@ -1,0 +1,132 @@
+---
+/**
+ * DEV-only: MAP / Google Maps URL の fixture プレビュー。
+ * 本番 DB は変更しない。SSG production では 404。
+ */
+import Layout from '../../layouts/Layout.astro'
+import EventMap from '../../components/EventMap.astro'
+import EventAccess from '../../components/EventAccess.astro'
+import { adminDevNotFoundResponse } from '../../lib/admin/dev-guard'
+import {
+  buildEventMapModel,
+  getEventMapDestination,
+  getGoogleMapsDirectionsUrl,
+  getGoogleMapsEmbedUrl,
+  getGoogleMapsSearchUrl,
+} from '../../lib/event-map'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+const caseA = {
+  title: 'A. lat/lng あり',
+  event: {
+    venue: 'TOKYO DREAM PARK',
+    address: '東京都江東区有明3-3-8',
+    latitude: 35.6345,
+    longitude: 139.7872,
+    nearest_station: '東京テレポート駅',
+    walk_minutes: 5,
+  },
+}
+
+const caseB = {
+  title: 'B. address のみ（event #42 相当）',
+  event: {
+    venue: 'TOKYO DREAM PARK(東京ドリームパーク)',
+    address: '東京都江東区有明3-3-8',
+    latitude: null,
+    longitude: null,
+    nearest_station: '東京テレポート駅',
+    walk_minutes: 5,
+  },
+}
+
+const caseC = {
+  title: 'C. 両方なし',
+  event: {
+    venue: '会場未設定',
+    address: null,
+    latitude: null,
+    longitude: null,
+    nearest_station: null,
+    walk_minutes: null,
+  },
+}
+
+const cases = [caseA, caseB, caseC]
+
+const embedKey =
+  typeof import.meta.env.PUBLIC_GOOGLE_MAPS_EMBED_API_KEY === 'string'
+    ? import.meta.env.PUBLIC_GOOGLE_MAPS_EMBED_API_KEY.trim()
+    : ''
+---
+
+<Layout title="Map UI preview | Seekigo DEV">
+  <main class="preview">
+    <h1>Map UI preview（DEV）</h1>
+    <p class="hint">
+      Embed iframe は PUBLIC_GOOGLE_MAPS_EMBED_API_KEY がある場合のみ。
+      現在: {embedKey ? 'キーあり（iframe）' : 'キーなし（リンク中心）'}
+    </p>
+
+    {
+      cases.map((c) => {
+        const dest = getEventMapDestination(c.event)
+        const search = getGoogleMapsSearchUrl(c.event)
+        const directions = getGoogleMapsDirectionsUrl(c.event)
+        const embed = getGoogleMapsEmbedUrl(c.event, embedKey || null)
+        const model = buildEventMapModel(c.event, {
+          embedApiKey: embedKey || null,
+        })
+        return (
+          <section class="case">
+            <h2>{c.title}</h2>
+            <p class="debug">
+              destination: {dest ? `${dest.kind} / ${dest.query}` : 'null'}
+              <br />
+              search: {search ?? 'null'}
+              <br />
+              directions: {directions ?? 'null'}
+              <br />
+              embed: {embed ? 'yes' : 'null'} / model: {model ? 'yes' : 'null'}
+            </p>
+            <EventAccess event={c.event} />
+            {!dest && <p class="hint">MAPセクションは非表示（期待どおり）</p>}
+          </section>
+        )
+      })
+    }
+  </main>
+</Layout>
+
+<style>
+  .preview {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px var(--px) 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .hint,
+  .debug {
+    font-size: 13px;
+    color: var(--c-muted);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .case {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 8px;
+    border-top: 1px solid var(--c-border);
+  }
+  .case h2 {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--c-text);
+  }
+</style>

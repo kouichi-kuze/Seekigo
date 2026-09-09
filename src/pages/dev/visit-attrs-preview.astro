@@ -1,0 +1,174 @@
+---
+/**
+ * DEV-only: visit attrs 公開表示の fixture プレビュー。
+ * 本番 DB は変更しない。SSG production では 404。
+ */
+import Layout from '../../layouts/Layout.astro'
+import EventVisitChecklist from '../../components/EventVisitChecklist.astro'
+import EventAccess from '../../components/EventAccess.astro'
+import { adminDevNotFoundResponse } from '../../lib/admin/dev-guard'
+import {
+  buildAccessSection,
+  buildVisitChecklistTags,
+  formatAdmissionLabel,
+  formatDurationLabel,
+  formatReservationLabel,
+  type VisitDisplayEvent,
+} from '../../lib/event-visit-display'
+
+if (!import.meta.env.DEV) {
+  return adminDevNotFoundResponse()
+}
+
+/** event #42 相当（現状 DB 値） */
+const event42Like: VisitDisplayEvent = {
+  nearest_station: '東京テレポート駅',
+  walk_minutes: 5,
+  venue_type: 'indoor',
+  family_friendly: 'unknown',
+  access_text: '東京テレポート駅から徒歩約5分',
+  reservation_status: null,
+  is_free: null,
+  price_text: null,
+  parking_status: null,
+}
+
+/** 全 visit attrs ありの表示確認用 */
+const fullAttrs: VisitDisplayEvent = {
+  is_free: false,
+  price_min: 2000,
+  price_max: 3000,
+  price_text: '一般 2,000円〜3,000円',
+  reservation_status: 'recommended',
+  reservation_url: 'https://example.com/reserve',
+  nearest_station: '渋谷駅',
+  walk_minutes: 8,
+  access_text: 'JR渋谷駅ハチ公口から徒歩約8分（別ルートあり）',
+  venue_type: 'mixed',
+  family_friendly: 'yes',
+  date_friendly: 'yes',
+  solo_friendly: 'yes',
+  rain_friendly: 'yes',
+  age_note: '小学生以下は保護者同伴',
+  duration_minutes_min: 60,
+  duration_minutes_max: 90,
+  parking_status: 'nearby',
+  parking_text: '近隣の有料パーキングを利用',
+  is_indoor: true,
+  is_kids: true,
+}
+
+const cases = [
+  { title: 'event #42 相当', event: event42Like },
+  { title: '全 visit attrs あり', event: fullAttrs },
+] as const
+---
+
+<Layout title="Visit attrs UI preview | Seekigo DEV">
+  <main class="preview">
+    <h1>Visit attrs UI preview（DEV）</h1>
+    <p class="hint">本番 DB・公開ページ本体は変更しません。</p>
+
+    {
+      cases.map((c) => {
+        const tags = buildVisitChecklistTags(c.event)
+        const access = buildAccessSection(c.event)
+        const admission = formatAdmissionLabel(c.event)
+        const reservation = formatReservationLabel(c.event.reservation_status)
+        const duration = formatDurationLabel(
+          c.event.duration_minutes_min,
+          c.event.duration_minutes_max,
+        )
+        const tagText = tags.map((t) => t.label).join(' / ') || '(none)'
+        const accessText = access ? 'yes' : 'no'
+        return (
+          <section class="case">
+            <h2>{c.title}</h2>
+            <p class="debug">
+              tags: {tagText}
+              <br />
+              access: {accessText} / admission: {admission || '-'} /
+              reservation: {reservation || '-'} / duration: {duration || '-'}
+            </p>
+            <dl class="meta">
+              {admission && (
+                <div>
+                  <dt>入場料</dt>
+                  <dd>{admission}</dd>
+                </div>
+              )}
+              {reservation && (
+                <div>
+                  <dt>予約</dt>
+                  <dd>{reservation}</dd>
+                </div>
+              )}
+              {duration && (
+                <div>
+                  <dt>所要時間</dt>
+                  <dd>{duration}</dd>
+                </div>
+              )}
+              {c.event.age_note && (
+                <div>
+                  <dt>年齢・対象</dt>
+                  <dd>{c.event.age_note}</dd>
+                </div>
+              )}
+            </dl>
+            <EventVisitChecklist event={c.event} />
+            <EventAccess event={c.event} />
+          </section>
+        )
+      })
+    }
+  </main>
+</Layout>
+
+<style>
+  .preview {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px var(--px) 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .hint,
+  .debug {
+    font-size: 13px;
+    color: var(--c-muted);
+    line-height: 1.6;
+  }
+  .case {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--c-border);
+  }
+  .case h2 {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--c-text);
+  }
+  .meta {
+    margin: 0;
+  }
+  .meta > div {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--c-border);
+  }
+  .meta dt {
+    font-size: 13px;
+    color: var(--c-muted);
+    font-weight: 600;
+  }
+  .meta dd {
+    margin: 0;
+    font-size: 14px;
+  }
+</style>

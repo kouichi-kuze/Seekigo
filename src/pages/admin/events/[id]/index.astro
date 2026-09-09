@@ -1,12 +1,28 @@
 ---
 import AdminLayout from '../../../../layouts/AdminLayout.astro'
+import AdminFieldLabel from '../../../../components/admin/AdminFieldLabel.astro'
 import FieldReviewCards from '../../../../components/admin/FieldReviewCards.astro'
 import { adminDevNotFoundResponse } from '../../../../lib/admin/dev-guard'
 import { getOrCreateAdminCsrfToken } from '../../../../lib/admin-security'
 import { ADMIN_EVENT_SELECT, type AdminEvent } from '../../../../lib/admin/types'
 import { fetchAdminFieldReviews } from '../../../../lib/admin/field-reviews'
+import {
+  ADMIN_ENUM_UNSET_LABEL,
+  FRIENDLY_VALUE_LABELS,
+  IMAGE_USAGE_STATUS_LABELS,
+  IS_FREE_LABELS,
+  PARKING_STATUS_LABELS,
+  RESERVATION_STATUS_LABELS,
+  VENUE_TYPE_LABELS,
+} from '../../../../lib/admin/field-labels'
 import { IMAGE_USAGE_STATUSES } from '../../../../lib/event-image-usage'
 import { isBodyProtectedFromSync } from '../../../../lib/event-status'
+import {
+  FRIENDLY_VALUES,
+  PARKING_STATUSES,
+  RESERVATION_STATUSES,
+  VENUE_TYPES,
+} from '../../../../lib/event-visit-attrs'
 import { getAdminEventEditStaticPaths } from '../../../../lib/admin/event-edit-paths'
 import {
   getAdminEventScheduleGroup,
@@ -19,6 +35,14 @@ import {
   type EventReactionSummaryRow,
 } from '../../../../lib/event-reaction-summary'
 import { classifyBulletTheme } from '../../../../lib/reaction-summary-quality'
+import {
+  fetchAdminEventTranslation,
+  fetchAdminReactionTranslation,
+} from '../../../../lib/admin-event-translate'
+import type {
+  EventTranslationRow,
+  ReactionSummaryTranslationRow,
+} from '../../../../lib/event-translations'
 
 /** 本番 SSG では admin 編集ページを生成しない。DEV では Supabase から id 一覧を取得。 */
 export async function getStaticPaths() {
@@ -44,6 +68,9 @@ let pendingFieldReviews: import('../../../../lib/admin/field-review-display').Ad
 let reactionSummary: EventReactionSummaryRow | null = null
 let reactionSources: EventReactionSourceRow[] = []
 let reactionLoadNote: string | null = null
+let eventTranslation: EventTranslationRow | null = null
+let reactionTranslation: ReactionSummaryTranslationRow | null = null
+let translationLoadNote: string | null = null
 let eventSourceCount = 0
 let loadError: string | null = null
 let message: string | null = null
@@ -72,6 +99,14 @@ if (sp.get('saved') === '1') {
   message = 'SNS・Web反応を Hidden にしました'
 } else if (sp.get('reaction_ai') === '1') {
   message = 'AI要約を生成しました（status=draft・要確認）'
+} else if (sp.get('translation_saved') === '1') {
+  message = '英語翻訳を保存しました'
+} else if (sp.get('translation_published') === '1') {
+  message = '英語翻訳を Publish しました'
+} else if (sp.get('translation_hidden') === '1') {
+  message = '英語翻訳を Hidden にしました'
+} else if (sp.get('translation_ai') === '1') {
+  message = 'AI英語翻訳を生成しました（status=draft・要確認）'
 }
 
 try {
@@ -133,6 +168,25 @@ try {
         reactionSources = (sourcesData ?? []) as EventReactionSourceRow[]
       }
     }
+
+    try {
+      eventTranslation = await fetchAdminEventTranslation(admin, eventId, 'en')
+      if (reactionSummary) {
+        reactionTranslation = await fetchAdminReactionTranslation(
+          admin,
+          reactionSummary.id,
+          'en',
+        )
+      }
+    } catch (te) {
+      const msg = te instanceof Error ? te.message : String(te)
+      if (/does not exist|PGRST205|schema cache/i.test(msg)) {
+        translationLoadNote =
+          '翻訳テーブル未作成です。scripts/create-event-translations.sql と grant-event-translations.sql を適用してください。'
+      } else {
+        translationLoadNote = `英語翻訳の読み込み失敗: ${msg}`
+      }
+    }
   }
 } catch (e) {
   loadError = e instanceof Error ? e.message : String(e)
@@ -178,8 +232,14 @@ const reactionBulletDebug = (reactionSummary?.summary_bullets ?? []).map((text) 
   theme: classifyBulletTheme(text),
 }))
 const reactionStatusLabel = reactionSummary?.status ?? '未作成'
+const translationStatusLabel = eventTranslation?.status ?? '未作成'
+const reactionTranslationBulletsText = bulletsToTextarea(
+  reactionTranslation?.summary_bullets ?? [],
+)
 const publicHref =
   event?.slug && isPublished ? `/tokyo/event/${event.slug}/` : null
+const publicEnHref =
+  event?.slug && isPublished ? `/en/tokyo/event/${event.slug}/` : null
 ---
 
 <AdminLayout title={event ? `Edit #${event.id}` : 'Edit Event'} csrfToken={csrfToken}>
@@ -210,6 +270,9 @@ const publicHref =
               <span class={`badge badge--reaction-${reactionSummary?.status ?? 'none'}`}>
                 reaction: {reactionStatusLabel}
               </span>
+              <span class={`badge badge--reaction-${eventTranslation?.status ?? 'none'}`}>
+                en: {translationStatusLabel}
+              </span>
             </div>
             <div class="event-header__links">
               {publicHref ? (
@@ -218,6 +281,11 @@ const publicHref =
                 </a>
               ) : (
                 <span class="hint">公開ページは published + slug 時のみ</span>
+              )}
+              {publicEnHref && (
+                <a href={publicEnHref} target="_blank" rel="noopener">
+                  EN ページ ↗
+                </a>
               )}
               {event.slug && <span class="hint">slug: {event.slug}</span>}
             </div>
@@ -306,14 +374,14 @@ const publicHref =
 
             <h2>基本情報</h2>
             <label>
-              title
+              <AdminFieldLabel field="title" />
               <input type="text" name="title" value={event.title ?? ''} required />
             </label>
 
             <h3 class="subhead">日時</h3>
             <div class="form-row">
               <label>
-                start_date
+                <AdminFieldLabel field="start_date" />
                 <input
                   type="date"
                   name="start_date"
@@ -321,7 +389,7 @@ const publicHref =
                 />
               </label>
               <label>
-                end_date
+                <AdminFieldLabel field="end_date" />
                 <input
                   type="date"
                   name="end_date"
@@ -331,7 +399,7 @@ const publicHref =
             </div>
             <div class="form-row">
               <label>
-                start_time (HH:MM)
+                <AdminFieldLabel field="start_time" note="HH:MM" />
                 <input
                   type="text"
                   name="start_time"
@@ -340,7 +408,7 @@ const publicHref =
                 />
               </label>
               <label>
-                end_time (HH:MM)
+                <AdminFieldLabel field="end_time" note="HH:MM" />
                 <input
                   type="text"
                   name="end_time"
@@ -352,33 +420,257 @@ const publicHref =
 
             <h3 class="subhead">会場</h3>
             <label>
-              venue
+              <AdminFieldLabel field="venue" />
               <input type="text" name="venue" value={event.venue ?? ''} />
             </label>
             <label>
-              area
+              <AdminFieldLabel field="area" />
               <input type="text" name="area" value={event.area ?? ''} />
             </label>
             <label>
-              address
+              <AdminFieldLabel field="address" />
               <textarea name="address" rows="2">{event.address ?? ''}</textarea>
             </label>
 
-            <h3 class="subhead">料金・カテゴリ</h3>
+            <h3 class="subhead">料金・予約</h3>
+            <p class="field-hint">
+              未設定は空欄のまま。推測で確定しない。金額単位は円（JPY）。
+            </p>
             <label>
-              price_text
+              <AdminFieldLabel field="is_free" />
+              <select name="is_free">
+                <option value="" selected={event.is_free == null}>{IS_FREE_LABELS.unset}</option>
+                <option value="true" selected={event.is_free === true}>{IS_FREE_LABELS.free}</option>
+                <option value="false" selected={event.is_free === false}>{IS_FREE_LABELS.paid}</option>
+              </select>
+            </label>
+            <div class="form-row">
+              <label>
+                <AdminFieldLabel field="price_min" />
+                <span class="admin-input-with-suffix">
+                  <input
+                    type="number"
+                    name="price_min"
+                    min="0"
+                    step="1"
+                    value={event.price_min ?? ''}
+                  />
+                  <span class="admin-field-suffix">円</span>
+                </span>
+              </label>
+              <label>
+                <AdminFieldLabel field="price_max" />
+                <span class="admin-input-with-suffix">
+                  <input
+                    type="number"
+                    name="price_max"
+                    min="0"
+                    step="1"
+                    value={event.price_max ?? ''}
+                  />
+                  <span class="admin-field-suffix">円</span>
+                </span>
+              </label>
+            </div>
+            <label>
+              <AdminFieldLabel field="price_text" />
               <input type="text" name="price_text" value={event.price_text ?? ''} />
             </label>
             <label>
-              category（カンマ区切り）
+              <AdminFieldLabel field="reservation_status" />
+              <select name="reservation_status">
+                <option value="" selected={!event.reservation_status}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                {RESERVATION_STATUSES.map((v) => (
+                  <option value={v} selected={event.reservation_status === v}>
+                    {RESERVATION_STATUS_LABELS[v] ?? v}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <AdminFieldLabel field="reservation_url" />
+              <input
+                type="url"
+                name="reservation_url"
+                value={event.reservation_url ?? ''}
+              />
+            </label>
+
+            <h3 class="subhead">アクセス</h3>
+            <label>
+              <AdminFieldLabel field="nearest_station" />
+              <input
+                type="text"
+                name="nearest_station"
+                value={event.nearest_station ?? ''}
+                placeholder="例: 東京テレポート駅"
+              />
+            </label>
+            <label>
+              <AdminFieldLabel field="walk_minutes" />
+              <span class="admin-input-with-suffix">
+                <input
+                  type="number"
+                  name="walk_minutes"
+                  min="0"
+                  step="1"
+                  value={event.walk_minutes ?? ''}
+                />
+                <span class="admin-field-suffix">分</span>
+              </span>
+            </label>
+            <label>
+              <AdminFieldLabel field="access_text" />
+              <textarea name="access_text" rows="2">{event.access_text ?? ''}</textarea>
+            </label>
+            <div class="form-row">
+              <label>
+                <AdminFieldLabel field="latitude" />
+                <input
+                  type="number"
+                  name="latitude"
+                  step="any"
+                  value={event.latitude ?? ''}
+                />
+              </label>
+              <label>
+                <AdminFieldLabel field="longitude" />
+                <input
+                  type="number"
+                  name="longitude"
+                  step="any"
+                  value={event.longitude ?? ''}
+                />
+              </label>
+            </div>
+            <label>
+              <AdminFieldLabel field="parking_status" />
+              <select name="parking_status">
+                <option value="" selected={!event.parking_status}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                {PARKING_STATUSES.map((v) => (
+                  <option value={v} selected={event.parking_status === v}>
+                    {PARKING_STATUS_LABELS[v] ?? v}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <AdminFieldLabel field="parking_text" />
+              <textarea name="parking_text" rows="2">{event.parking_text ?? ''}</textarea>
+            </label>
+
+            <h3 class="subhead">行く前チェック</h3>
+            <p class="field-hint">
+              イベント属性（公式情報ベース）。SNS反応の signals とは別です。不明は「不明」か「未設定」。
+            </p>
+            <label>
+              <AdminFieldLabel field="venue_type" />
+              <select name="venue_type">
+                <option value="" selected={!event.venue_type}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                {VENUE_TYPES.map((v) => (
+                  <option value={v} selected={event.venue_type === v}>
+                    {VENUE_TYPE_LABELS[v] ?? v}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div class="form-row">
+              <label>
+                <AdminFieldLabel field="family_friendly" />
+                <select name="family_friendly">
+                  <option value="" selected={!event.family_friendly}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                  {FRIENDLY_VALUES.map((v) => (
+                    <option value={v} selected={event.family_friendly === v}>
+                      {FRIENDLY_VALUE_LABELS[v] ?? v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <AdminFieldLabel field="date_friendly" />
+                <select name="date_friendly">
+                  <option value="" selected={!event.date_friendly}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                  {FRIENDLY_VALUES.map((v) => (
+                    <option value={v} selected={event.date_friendly === v}>
+                      {FRIENDLY_VALUE_LABELS[v] ?? v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div class="form-row">
+              <label>
+                <AdminFieldLabel field="solo_friendly" />
+                <select name="solo_friendly">
+                  <option value="" selected={!event.solo_friendly}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                  {FRIENDLY_VALUES.map((v) => (
+                    <option value={v} selected={event.solo_friendly === v}>
+                      {FRIENDLY_VALUE_LABELS[v] ?? v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <AdminFieldLabel field="rain_friendly" />
+                <select name="rain_friendly">
+                  <option value="" selected={!event.rain_friendly}>{ADMIN_ENUM_UNSET_LABEL}</option>
+                  {FRIENDLY_VALUES.map((v) => (
+                    <option value={v} selected={event.rain_friendly === v}>
+                      {FRIENDLY_VALUE_LABELS[v] ?? v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label>
+              <AdminFieldLabel field="age_note" />
+              <input
+                type="text"
+                name="age_note"
+                value={event.age_note ?? ''}
+                placeholder="例: 3歳以上 / 小学生以下は保護者同伴"
+              />
+            </label>
+            <div class="form-row">
+              <label>
+                <AdminFieldLabel field="duration_minutes_min" />
+                <span class="admin-input-with-suffix">
+                  <input
+                    type="number"
+                    name="duration_minutes_min"
+                    min="0"
+                    step="1"
+                    value={event.duration_minutes_min ?? ''}
+                  />
+                  <span class="admin-field-suffix">分</span>
+                </span>
+              </label>
+              <label>
+                <AdminFieldLabel field="duration_minutes_max" />
+                <span class="admin-input-with-suffix">
+                  <input
+                    type="number"
+                    name="duration_minutes_max"
+                    min="0"
+                    step="1"
+                    value={event.duration_minutes_max ?? ''}
+                  />
+                  <span class="admin-field-suffix">分</span>
+                </span>
+              </label>
+            </div>
+
+            <h3 class="subhead">カテゴリ・概要</h3>
+            <label>
+              <AdminFieldLabel field="category" note="カンマ区切り" />
               <input type="text" name="category" value={fmtCategory(event.category)} />
             </label>
             <label>
-              official_url
+              <AdminFieldLabel field="official_url" />
               <input type="url" name="official_url" value={event.official_url ?? ''} />
             </label>
             <label>
-              summary
+              <AdminFieldLabel field="summary" />
               <textarea name="summary" rows="8">{event.summary ?? ''}</textarea>
             </label>
 
@@ -403,7 +695,7 @@ const publicHref =
                 )}
               </div>
               <label>
-                image_url
+                <AdminFieldLabel field="image_url" />
                 <input
                   form="event-edit-form"
                   type="url"
@@ -412,17 +704,17 @@ const publicHref =
                 />
               </label>
               <label>
-                image_usage_status
+                <AdminFieldLabel field="image_usage_status" />
                 <select form="event-edit-form" name="image_usage_status">
                   {IMAGE_USAGE_STATUSES.map((s) => (
                     <option value={s} selected={usageStatusOf(event) === s}>
-                      {s}
+                      {IMAGE_USAGE_STATUS_LABELS[s] ?? s}
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                image_credit（licensed / organizer_granted 時）
+                <AdminFieldLabel field="image_credit" note="ライセンス取得済 / 主催者許可時" />
                 <input
                   form="event-edit-form"
                   type="text"
@@ -732,11 +1024,166 @@ const publicHref =
                 }
               </details>
             </section>
+
+            <section class="admin-panel translation-section">
+              <h2>英語翻訳</h2>
+              <p class="hint compact">
+                日本語イベント本体は変更しません。AI 生成は draft。公開 EN ページは
+                published のみ使用します。
+              </p>
+              {translationLoadNote && <p class="err">{translationLoadNote}</p>}
+
+              <div class="reaction-summary-card">
+                <div>
+                  <span class="card-k">status</span>
+                  <strong class={`badge badge--reaction-${eventTranslation?.status ?? 'none'}`}>
+                    {translationStatusLabel}
+                  </strong>
+                </div>
+                <div>
+                  <span class="card-k">locale</span>
+                  <strong>en</strong>
+                </div>
+                <div>
+                  <span class="card-k">generated_at</span>
+                  <strong class="card-v-sm">
+                    {eventTranslation?.generated_at ?? '—'}
+                  </strong>
+                </div>
+                <div>
+                  <span class="card-k">reaction EN</span>
+                  <strong class={`badge badge--reaction-${reactionTranslation?.status ?? 'none'}`}>
+                    {reactionTranslation?.status ?? '未作成'}
+                  </strong>
+                </div>
+              </div>
+
+              <div class="reaction-actions reaction-actions--ai">
+                <form method="post" action="/admin/events/" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="translation_ai_generate" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <input type="hidden" name="translate_reaction" value="1" />
+                  <button type="submit" class="btn btn--secondary">
+                    AI翻訳を生成
+                  </button>
+                </form>
+                <p class="hint compact">
+                  サーバー側のみ。生成後は draft。自動 Publish しません。published/hidden
+                  は上書きしません（force なし）。公式英語タイトルがあれば AI より優先。
+                </p>
+              </div>
+
+              <form method="post" action="/admin/events/" class="reaction-form">
+                <input type="hidden" name="csrf_token" value={csrfToken} />
+                <input type="hidden" name="intent" value="translation_save" />
+                <input type="hidden" name="event_id" value={String(event.id)} />
+
+                <div class="translation-fields">
+                  <div class="translation-pair">
+                    <label>
+                      title（JA）
+                      <textarea rows="2" readonly>{event.title ?? ''}</textarea>
+                    </label>
+                    <label>
+                      title（EN）
+                      <textarea name="tr_title" rows="2">{eventTranslation?.title ?? ''}</textarea>
+                    </label>
+                  </div>
+                  <div class="translation-pair">
+                    <label>
+                      summary（JA）
+                      <textarea rows="3" readonly>{event.summary ?? ''}</textarea>
+                    </label>
+                    <label>
+                      summary（EN）
+                      <textarea name="tr_summary" rows="3">{eventTranslation?.summary ?? ''}</textarea>
+                    </label>
+                  </div>
+                  <div class="translation-pair">
+                    <label>
+                      access_text（JA）
+                      <textarea rows="2" readonly>{event.access_text ?? ''}</textarea>
+                    </label>
+                    <label>
+                      access_text（EN）
+                      <textarea name="tr_access_text" rows="2">{eventTranslation?.access_text ?? ''}</textarea>
+                    </label>
+                  </div>
+                  <div class="translation-pair">
+                    <label>
+                      price_text（JA）
+                      <textarea rows="2" readonly>{event.price_text ?? ''}</textarea>
+                    </label>
+                    <label>
+                      price_text（EN）
+                      <textarea name="tr_price_text" rows="2">{eventTranslation?.price_text ?? ''}</textarea>
+                    </label>
+                  </div>
+                  <div class="translation-pair">
+                    <label>
+                      age_note（JA）
+                      <textarea rows="2" readonly>{event.age_note ?? ''}</textarea>
+                    </label>
+                    <label>
+                      age_note（EN）
+                      <textarea name="tr_age_note" rows="2">{eventTranslation?.age_note ?? ''}</textarea>
+                    </label>
+                  </div>
+                  <div class="translation-pair">
+                    <label>
+                      parking_text（JA）
+                      <textarea rows="2" readonly>{event.parking_text ?? ''}</textarea>
+                    </label>
+                    <label>
+                      parking_text（EN）
+                      <textarea name="tr_parking_text" rows="2">{eventTranslation?.parking_text ?? ''}</textarea>
+                    </label>
+                  </div>
+                  <div class="translation-pair">
+                    <label>
+                      reaction bullets（JA published）
+                      <textarea rows="4" readonly>{reactionBulletsText}</textarea>
+                    </label>
+                    <label>
+                      reaction bullets（EN）
+                      <textarea
+                        name="tr_reaction_bullets"
+                        rows="4"
+                        placeholder="1行1項目"
+                      >{reactionTranslationBulletsText}</textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="reaction-actions">
+                  <button type="submit" class="btn btn--primary">翻訳を保存</button>
+                </div>
+              </form>
+
+              <div class="reaction-actions reaction-actions--status">
+                <span class="action-label">英語翻訳の公開状態</span>
+                <form method="post" action="/admin/events/" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="translation_publish" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <button type="submit" class="btn btn--secondary">
+                    Translation Publish
+                  </button>
+                </form>
+                <form method="post" action="/admin/events/" class="inline-form">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="translation_hide" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <button type="submit" class="btn btn--ghost">Translation Hidden</button>
+                </form>
+              </div>
+            </section>
           </div>
         </div>
 
         <details class="danger-fold">
-          <summary>Danger Zone（削除）</summary>
+          <summary>危険な操作（削除）</summary>
           <div class="danger-zone-inner">
             <p class="err">
               物理削除します。event_sources / field_reviews は CASCADE、dedupe reviews
@@ -954,6 +1401,34 @@ const publicHref =
     letter-spacing: 0.02em;
   }
 
+  .field-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: #64748b;
+    line-height: 1.45;
+  }
+
+  .admin-input-with-suffix {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 0.3rem;
+  }
+
+  .admin-input-with-suffix input {
+    margin-top: 0 !important;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .admin-field-suffix {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #64748b;
+  }
+
   .edit-form label,
   .image-panel label,
   .reaction-form label {
@@ -961,6 +1436,30 @@ const publicHref =
     margin-bottom: 0.85rem;
     font-weight: 600;
     font-size: 0.88rem;
+  }
+
+  .translation-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+
+  .translation-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  @media (max-width: 720px) {
+    .translation-pair {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .translation-pair textarea[readonly] {
+    background: #f8fafc;
+    color: #475569;
   }
 
   .edit-form input[type='text'],

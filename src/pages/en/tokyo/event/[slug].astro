@@ -1,19 +1,30 @@
 ---
-import Layout from '../../../layouts/Layout.astro'
-import { supabase } from '../../../lib/supabase'
-import { formatAreaLabel, formatEventDateRange, isEventEnded } from '../../../lib/display'
-import { resolveEventDisplayImage } from '../../../lib/event-image-usage'
-import EventReactionSummary from '../../../components/EventReactionSummary.astro'
-import EventVisitChecklist from '../../../components/EventVisitChecklist.astro'
-import EventAccess from '../../../components/EventAccess.astro'
-import { fetchPublishedReactionSummary } from '../../../lib/event-reaction-summary'
+/**
+ * English event detail foundation (Phase 4C-5 / 4C-6).
+ * Structured attrs → fixed EN dictionary.
+ * Free text → published event_translations only (else hide; title may fallback JA).
+ */
+import Layout from '../../../../layouts/Layout.astro'
+import { supabase } from '../../../../lib/supabase'
+import { isEventEnded } from '../../../../lib/display'
+import { resolveEventDisplayImage } from '../../../../lib/event-image-usage'
+import EventReactionSummary from '../../../../components/EventReactionSummary.astro'
+import EventVisitChecklist from '../../../../components/EventVisitChecklist.astro'
+import EventAccess from '../../../../components/EventAccess.astro'
+import { fetchPublishedReactionSummary } from '../../../../lib/event-reaction-summary'
 import {
-  formatAdmissionLabel,
-  formatAgeNote,
-  formatDurationLabel,
-  formatReservationLabel,
-} from '../../../lib/event-visit-display'
-import { getLocalizedEventPath } from '../../../lib/i18n/locale'
+  fetchPublishedEventTranslation,
+  fetchPublishedReactionTranslation,
+} from '../../../../lib/event-translations'
+import {
+  EVENT_UI_EN,
+  formatDurationEn,
+  formatEventDateRangeEn,
+  formatEventTimeRangeEn,
+  formatPriceEn,
+  formatReservationStatusEn,
+} from '../../../../lib/i18n/event-en'
+import { getLocalizedEventPath } from '../../../../lib/i18n/locale'
 
 export async function getStaticPaths() {
   const { data: events } = await supabase
@@ -36,8 +47,24 @@ const { data: event } = await supabase
   .eq('status', 'published')
   .single()
 
-const dateLabel = formatEventDateRange(event?.start_date, event?.end_date)
-const areaLabel = formatAreaLabel(event?.area)
+const translation = event
+  ? await fetchPublishedEventTranslation(supabase, Number(event.id), 'en')
+  : null
+
+const titleEn = translation?.title?.trim() || null
+const displayTitle = titleEn || event?.title || ''
+const titleLang = titleEn ? 'en' : 'ja'
+
+const summaryEn = translation?.summary?.trim() || null
+const ageNoteEn = translation?.age_note?.trim() || null
+const priceTextEn = translation?.price_text?.trim() || null
+const accessTextEn = translation?.access_text?.trim() || null
+const parkingTextEn = translation?.parking_text?.trim() || null
+
+const dateLabel = formatEventDateRangeEn(event?.start_date, event?.end_date)
+const timeLabel = event
+  ? formatEventTimeRangeEn(event.start_time, event.end_time)
+  : null
 const displayImage = event ? resolveEventDisplayImage(event) : null
 const imageCredit =
   displayImage?.kind === 'external' && event?.image_credit
@@ -45,23 +72,19 @@ const imageCredit =
     : null
 const isEnded = event ? isEventEnded(event.start_date, event.end_date) : false
 
-const timeLabel = (() => {
-  if (!event) return null
-  const start = event.start_time?.trim() || null
-  const end = event.end_time?.trim() || null
-  if (!start && !end) return null
-  if (start && end) return `${start} 〜 ${end}`
-  return start ?? end
-})()
-
-const admissionLabel = event ? formatAdmissionLabel(event) : null
+const structuredAdmission = event ? formatPriceEn(event) : null
+/** Structured price preferred; EN price_text only as supplement / fallback */
+const admissionLabel = structuredAdmission
+  ? structuredAdmission
+  : priceTextEn
+const admissionNote =
+  structuredAdmission && priceTextEn ? priceTextEn : null
 const reservationLabel = event
-  ? formatReservationLabel(event.reservation_status)
+  ? formatReservationStatusEn(event.reservation_status)
   : null
 const reservationUrl = event?.reservation_url?.trim() || null
-const ageNote = event ? formatAgeNote(event.age_note) : null
 const durationLabel = event
-  ? formatDurationLabel(
+  ? formatDurationEn(
       event.duration_minutes_min,
       event.duration_minutes_max,
     )
@@ -74,18 +97,27 @@ const hasBasicInfo = Boolean(
       event.venue ||
       event.address ||
       admissionLabel ||
+      admissionNote ||
       reservationLabel ||
       reservationUrl ||
-      ageNote ||
-      durationLabel),
+      durationLabel ||
+      ageNoteEn),
 )
 
-/** header は夜のみ（無料・子ども・屋内は行く前チェックへ） */
 const showNightTag = Boolean(event?.is_night)
 
 const reactionSummary = event
   ? await fetchPublishedReactionSummary(supabase, Number(event.id))
   : null
+const reactionTranslation =
+  reactionSummary
+    ? await fetchPublishedReactionTranslation(
+        supabase,
+        reactionSummary.id,
+        'en',
+      )
+    : null
+const reactionBulletsEn = reactionTranslation?.summary_bullets ?? null
 
 const jaPath = event?.slug
   ? getLocalizedEventPath(String(event.slug), 'ja')
@@ -101,15 +133,21 @@ const hreflangAlternates =
         { lang: 'x-default', path: jaPath },
       ]
     : []
+
+const pageTitle = event ? `${displayTitle} | Seekigo` : 'Seekigo'
+const metaDescription = event
+  ? summaryEn
+    ? summaryEn.slice(0, 160)
+    : `Event information for ${displayTitle} in Tokyo, including dates, venue, admission, access and visitor tips.`
+  : 'Tokyo event information on Seekigo.'
+
+const L = EVENT_UI_EN
 ---
 
 <Layout
-  title={event ? `${event.title} | Seekigo` : 'Seekigo'}
-  description={
-    event?.summary ??
-    `${event?.title ?? ''}の詳細情報。東京のイベント・お出かけ情報はSeekigoで。`
-  }
-  locale="ja"
+  title={pageTitle}
+  description={metaDescription}
+  locale="en"
   hreflangAlternates={hreflangAlternates}
   eventLanguageSwitcher={
     event?.slug
@@ -120,27 +158,32 @@ const hreflangAlternates =
   {event ? (
     <main class="event-page">
       <article class="event-article">
-        <nav class="breadcrumb" aria-label="パンくず">
-          <a href="/tokyo/">東京のイベント</a>
+        <nav class="breadcrumb" aria-label={L.breadcrumbNav}>
+          <a href="/tokyo/">{L.breadcrumbTokyo}</a>
           <span class="breadcrumb__sep" aria-hidden="true">›</span>
-          <span class="breadcrumb__current" aria-current="page">{event.title}</span>
+          <span
+            class="breadcrumb__current"
+            aria-current="page"
+            lang={titleLang}
+          >
+            {displayTitle}
+          </span>
         </nav>
 
         <header class="event-header">
           {showNightTag && (
             <div class="event-tags">
-              <span class="tag">夜</span>
+              <span class="tag">{L.night}</span>
             </div>
           )}
-          {areaLabel && <p class="event-area">{areaLabel}</p>}
-          <h1 class="event-title">{event.title}</h1>
+          <h1 class="event-title" lang={titleLang}>{displayTitle}</h1>
         </header>
 
         {displayImage && (
           <div class="event-image">
             <img
               src={displayImage.src}
-              alt={event.title}
+              alt={displayTitle}
               loading="eager"
               decoding="async"
               class:list={[
@@ -150,52 +193,71 @@ const hreflangAlternates =
             />
             {isEnded && (
               <div class="event-image__ended" aria-hidden="true">
-                <span class="event-image__ended-label">開催終了</span>
+                <span class="event-image__ended-label">{L.ended}</span>
               </div>
             )}
             {imageCredit && <p class="event-image__credit">{imageCredit}</p>}
           </div>
         )}
 
+        {summaryEn && (
+          <section class="event-body" aria-labelledby="event-overview-heading">
+            <h2 id="event-overview-heading" class="event-section-heading">
+              {L.overview}
+            </h2>
+            <p class="event-body__text">{summaryEn}</p>
+          </section>
+        )}
+
         {hasBasicInfo && (
           <section class="event-basics" aria-labelledby="event-basics-heading">
             <h2 id="event-basics-heading" class="event-section-heading">
-              基本情報
+              {L.basics}
             </h2>
             <dl class="event-meta">
               {dateLabel && (
                 <div class="event-meta__row">
-                  <dt>開催日</dt>
-                  <dd>{dateLabel}</dd>
+                  <dt>{L.dates}</dt>
+                  <dd>
+                    <time datetime={event.start_date ?? undefined}>{dateLabel}</time>
+                  </dd>
                 </div>
               )}
               {timeLabel && (
                 <div class="event-meta__row">
-                  <dt>開催時間</dt>
-                  <dd>{timeLabel}</dd>
+                  <dt>{L.hours}</dt>
+                  <dd>
+                    <span>{timeLabel}</span>
+                    <span class="event-meta__note">{L.hoursNote}</span>
+                  </dd>
                 </div>
               )}
               {event.venue && (
                 <div class="event-meta__row">
-                  <dt>会場</dt>
-                  <dd>{event.venue}</dd>
+                  <dt>{L.venue}</dt>
+                  <dd lang="ja">{event.venue}</dd>
                 </div>
               )}
               {event.address && (
                 <div class="event-meta__row">
-                  <dt>住所</dt>
-                  <dd>{event.address}</dd>
+                  <dt>{L.address}</dt>
+                  <dd lang="ja">{event.address}</dd>
                 </div>
               )}
-              {admissionLabel && (
+              {(admissionLabel || admissionNote) && (
                 <div class="event-meta__row">
-                  <dt>入場料</dt>
-                  <dd>{admissionLabel}</dd>
+                  <dt>{L.admission}</dt>
+                  <dd>
+                    {admissionLabel && <span>{admissionLabel}</span>}
+                    {admissionNote && (
+                      <span class="event-meta__note">{admissionNote}</span>
+                    )}
+                  </dd>
                 </div>
               )}
               {(reservationLabel || reservationUrl) && (
                 <div class="event-meta__row">
-                  <dt>予約</dt>
+                  <dt>{L.reservation}</dt>
                   <dd class="event-meta__reservation">
                     {reservationLabel && <span>{reservationLabel}</span>}
                     {reservationUrl && (
@@ -204,21 +266,21 @@ const hreflangAlternates =
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        予約ページを見る
+                        {L.reservationLink}
                       </a>
                     )}
                   </dd>
                 </div>
               )}
-              {ageNote && (
+              {ageNoteEn && (
                 <div class="event-meta__row">
-                  <dt>年齢・対象</dt>
-                  <dd>{ageNote}</dd>
+                  <dt>{L.age}</dt>
+                  <dd>{ageNoteEn}</dd>
                 </div>
               )}
               {durationLabel && (
                 <div class="event-meta__row">
-                  <dt>所要時間</dt>
+                  <dt>{L.duration}</dt>
                   <dd>{durationLabel}</dd>
                 </div>
               )}
@@ -226,18 +288,22 @@ const hreflangAlternates =
           </section>
         )}
 
-        {event.summary && (
-          <section class="event-body">
-            <h2 class="event-section-heading">イベント概要</h2>
-            <p class="event-body__text">{event.summary}</p>
-          </section>
+        <EventVisitChecklist event={event} locale="en" />
+
+        <EventAccess
+          event={event}
+          locale="en"
+          accessTextEn={accessTextEn}
+          parkingTextEn={parkingTextEn}
+        />
+
+        {reactionSummary && (
+          <EventReactionSummary
+            summary={reactionSummary}
+            locale="en"
+            bulletsEn={reactionBulletsEn}
+          />
         )}
-
-        <EventVisitChecklist event={event} />
-
-        <EventAccess event={event} />
-
-        {reactionSummary && <EventReactionSummary summary={reactionSummary} />}
 
         {event.official_url && (
           <div class="event-cta">
@@ -247,14 +313,14 @@ const hreflangAlternates =
               rel="noopener noreferrer"
               class="btn-primary"
             >
-              公式サイトで詳細を見る →
+              {L.officialCta} →
             </a>
           </div>
         )}
 
         {event.source_url && (
           <p class="event-source">
-            情報元:{' '}
+            {L.source}:{' '}
             <a
               href={event.source_url}
               target="_blank"
@@ -267,36 +333,30 @@ const hreflangAlternates =
 
         <section class="organizer-note" aria-labelledby="organizer-note-heading">
           <h2 id="organizer-note-heading" class="organizer-note__heading">
-            イベント主催者・関係者の皆さまへ
+            {L.organizerHeading}
           </h2>
-          <p class="organizer-note__text">
-            Seekigoでは、公開情報をもとにイベント情報をご紹介しています。
-            掲載内容の確認、公式画像のご提供、情報の追加・変更、
-            今後のイベント掲載についてご希望がございましたら、
-            お気軽にご連絡ください。
-            ご提供いただいた情報は内容を確認のうえ、掲載に反映いたします。
-          </p>
+          <p class="organizer-note__text">{L.organizerBody}</p>
           <p class="organizer-note__cta">
             <a
               class="organizer-note__link"
-              href={`/contact/event-info/?event=${encodeURIComponent(`/tokyo/event/${event.slug}/`)}`}
+              href={`/contact/event-info/?event=${encodeURIComponent(`/en/tokyo/event/${event.slug}/`)}`}
             >
-              掲載・情報提供について連絡する
+              {L.organizerCta}
             </a>
           </p>
         </section>
 
         <p class="back-link">
-          <a href="/tokyo/">← 東京のイベント一覧に戻る</a>
+          <a href="/tokyo/">{L.backToList}</a>
         </p>
       </article>
     </main>
   ) : (
     <main class="event-page">
       <div class="event-article">
-        <p class="not-found">イベントが見つかりませんでした。</p>
+        <p class="not-found">{L.notFound}</p>
         <p class="back-link">
-          <a href="/tokyo/">← 東京のイベント一覧に戻る</a>
+          <a href="/tokyo/">{L.backToList}</a>
         </p>
       </div>
     </main>
@@ -360,12 +420,6 @@ const hreflangAlternates =
     border-radius: var(--r-sm);
     letter-spacing: 0.02em;
   }
-  .event-area {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--c-primary);
-    letter-spacing: 0.02em;
-  }
   .event-title {
     font-size: clamp(22px, 5vw, 40px);
     font-weight: 800;
@@ -373,6 +427,13 @@ const hreflangAlternates =
     line-height: 1.3;
     color: var(--c-text);
     overflow-wrap: anywhere;
+  }
+
+  .event-body__text {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--c-text);
   }
 
   .event-image {
@@ -443,7 +504,7 @@ const hreflangAlternates =
   }
   .event-meta__row {
     display: grid;
-    grid-template-columns: 5.5rem 1fr;
+    grid-template-columns: minmax(6.5rem, 8.5rem) 1fr;
     gap: 12px;
     padding: 12px 0;
     border-bottom: 1px solid var(--c-border);
@@ -460,6 +521,14 @@ const hreflangAlternates =
     color: var(--c-text);
     line-height: 1.55;
     overflow-wrap: anywhere;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .event-meta__note {
+    font-size: 12px;
+    color: var(--c-muted);
+    font-weight: 500;
   }
   .event-meta__reservation {
     display: flex;
@@ -476,18 +545,6 @@ const hreflangAlternates =
   }
   .event-meta__reservation a:hover {
     color: var(--c-primary-dk);
-  }
-
-  .event-body {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .event-body__text {
-    font-size: 15px;
-    line-height: 1.85;
-    color: var(--c-text);
-    white-space: pre-wrap;
   }
 
   .event-cta {

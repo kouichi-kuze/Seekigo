@@ -1,0 +1,133 @@
+---
+/**
+ * Compact JP | EN switcher for event detail pages (URL only — no translate API).
+ */
+import type { SiteLocale } from '../lib/i18n/locale'
+import {
+  getEventLanguageSwitcherLinks,
+  shouldShowEventLanguageSwitcher,
+} from '../lib/i18n/locale'
+
+interface Props {
+  slug: string
+  currentLocale: SiteLocale
+  /** Future: hide EN when page not generated. Default true. */
+  enPageAvailable?: boolean
+  jaPageAvailable?: boolean
+}
+
+const {
+  slug,
+  currentLocale,
+  enPageAvailable = true,
+  jaPageAvailable = true,
+} = Astro.props
+
+const show = shouldShowEventLanguageSwitcher({
+  slug,
+  enPageAvailable,
+  jaPageAvailable,
+})
+
+const links = show
+  ? getEventLanguageSwitcherLinks(slug, currentLocale)
+  : null
+---
+
+{
+  links && (
+    <nav class="lang-switch" aria-label="Language switcher">
+      <a
+        href={links.jaHref}
+        hreflang="ja"
+        lang="en"
+        class:list={[
+          'lang-switch__link',
+          currentLocale === 'ja' && 'lang-switch__link--active',
+        ]}
+        aria-current={currentLocale === 'ja' ? 'page' : undefined}
+      >
+        JP
+      </a>
+      <span class="lang-switch__sep" aria-hidden="true">
+        |
+      </span>
+      <a
+        href={links.enHref}
+        hreflang="en"
+        lang="en"
+        class:list={[
+          'lang-switch__link',
+          currentLocale === 'en' && 'lang-switch__link--active',
+        ]}
+        aria-current={currentLocale === 'en' ? 'page' : undefined}
+      >
+        EN
+      </a>
+    </nav>
+  )
+}
+
+<style>
+  .lang-switch {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 2px;
+    padding: 2px 4px;
+    border: 1px solid var(--c-border, #e5e7eb);
+    border-radius: 999px;
+    background: var(--c-bg, #f8fafc);
+    white-space: nowrap;
+    line-height: 1;
+  }
+
+  .lang-switch__sep {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--c-border, #e5e7eb);
+    user-select: none;
+  }
+
+  .lang-switch__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.75rem;
+    padding: 4px 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--c-muted, #6b7280) !important;
+    border-radius: 999px;
+    text-decoration: none !important;
+    transition:
+      color 0.15s,
+      background 0.15s;
+  }
+
+  .lang-switch__link:hover {
+    color: var(--c-navy, #0e2744) !important;
+  }
+
+  .lang-switch__link--active {
+    color: var(--c-white, #fff) !important;
+    background: var(--c-navy, #0e2744);
+  }
+
+  .lang-switch__link--active:hover {
+    color: var(--c-white, #fff) !important;
+    background: var(--c-navy, #0e2744);
+  }
+
+  @media (max-width: 719px) {
+    .lang-switch {
+      padding: 1px 3px;
+    }
+    .lang-switch__link {
+      min-width: 1.55rem;
+      padding: 3px 6px;
+      font-size: 10px;
+    }
+  }
+</style>

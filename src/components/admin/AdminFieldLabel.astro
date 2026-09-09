@@ -1,0 +1,36 @@
+---
+import {
+  ADMIN_EVENT_FIELD_LABELS,
+  type AdminEventFieldKey,
+} from '../../lib/admin/field-labels'
+
+interface Props {
+  field: AdminEventFieldKey
+  /** ラベル末尾の補足（例: HH:MM、カンマ区切り） */
+  note?: string
+}
+
+const { field, note } = Astro.props
+const ja = ADMIN_EVENT_FIELD_LABELS[field]
+---
+
+<span class="admin-field-label">
+  {ja}{note ? `（${note}）` : ''}
+  <span class="admin-field-key">{field}</span>
+</span>
+
+<style>
+  .admin-field-label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+    line-height: 1.35;
+  }
+
+  .admin-field-key {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 400;
+  }
+</style>

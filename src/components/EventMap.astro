@@ -1,0 +1,265 @@
+---
+/**
+ * 公開イベント詳細: 会場マップ + Google Maps リンク。
+ *
+ * Embed:
+ * - APIキーがある場合のみ公式 Maps Embed API iframe
+ * - キーなしはリンク中心（legacy output=embed は現行 iframe 不可のため不使用）
+ *
+ * Privacy: Seekigo は Geolocation API を使わない。
+ */
+import {
+  buildEventMapModel,
+  type EventMapInput,
+} from '../lib/event-map'
+import { EVENT_UI_EN } from '../lib/i18n/event-en'
+import type { SiteLocale } from '../lib/i18n/locale'
+
+interface Props {
+  event: EventMapInput
+  locale?: SiteLocale
+}
+
+const { event, locale = 'ja' } = Astro.props
+
+const embedApiKey =
+  typeof import.meta.env.PUBLIC_GOOGLE_MAPS_EMBED_API_KEY === 'string'
+    ? import.meta.env.PUBLIC_GOOGLE_MAPS_EMBED_API_KEY
+    : null
+
+const map = buildEventMapModel(event, { embedApiKey, locale })
+
+const copy =
+  locale === 'en'
+    ? {
+        heading: EVENT_UI_EN.venueMap,
+        open: EVENT_UI_EN.openMap,
+        directions: EVENT_UI_EN.directions,
+        hint: EVENT_UI_EN.openMapHint,
+        iframeTitle: map?.venue
+          ? `Map of ${map.venue}`
+          : 'Event venue map',
+      }
+    : {
+        heading: '会場マップ',
+        open: 'Google Mapsで開く',
+        directions: '現在地からルート',
+        hint: '地図を開く',
+        iframeTitle: map?.venue
+          ? `${map.venue}の地図`
+          : 'イベント会場の地図',
+      }
+---
+
+{
+  map && (
+    <div class="event-map">
+      <h3 class="event-map__heading">{copy.heading}</h3>
+
+      {
+        map.embedUrl ? (
+          <div class="event-map__frame-wrap">
+            <iframe
+              class="event-map__frame"
+              src={map.embedUrl}
+              title={copy.iframeTitle}
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade"
+              allowfullscreen
+            />
+          </div>
+        ) : (
+          <a
+            class="event-map__preview"
+            href={map.searchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="event-map__preview-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
+                <path
+                  d="M12 21s7-5.4 7-11a7 7 0 1 0-14 0c0 5.6 7 11 7 11Z"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+                <circle cx="12" cy="10" r="2.4" fill="currentColor" />
+              </svg>
+            </span>
+            <span class="event-map__preview-body">
+              {map.venue && (
+                <span class="event-map__preview-venue" lang="ja">{map.venue}</span>
+              )}
+              <span
+                class="event-map__preview-label"
+                lang={/[^\x00-\x7F]/.test(map.label) ? 'ja' : undefined}
+              >
+                {map.label}
+              </span>
+              <span class="event-map__preview-hint">{copy.hint}</span>
+            </span>
+          </a>
+        )
+      }
+
+      <div class="event-map__actions">
+        <a
+          class="event-map__link"
+          href={map.searchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {copy.open}
+        </a>
+        <a
+          class="event-map__link event-map__link--primary"
+          href={map.directionsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {copy.directions}
+        </a>
+      </div>
+    </div>
+  )
+}
+
+<style>
+  .event-map {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 4px;
+  }
+
+  .event-map__heading {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--c-text);
+  }
+
+  .event-map__frame-wrap {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--r-md, 10px);
+    overflow: hidden;
+    border: 1px solid var(--c-border);
+    background: var(--c-border);
+  }
+
+  .event-map__frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+
+  .event-map__preview {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 16px;
+    border-radius: var(--r-md, 10px);
+    border: 1px solid color-mix(in srgb, var(--c-cyan, #00a3ff) 28%, #e2e8f0);
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--c-cyan, #00a3ff) 10%, #fff) 0%,
+      #fff 55%,
+      color-mix(in srgb, var(--c-navy, #0e2744) 4%, #fff) 100%
+    );
+    color: inherit;
+    text-decoration: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .event-map__preview:hover {
+    border-color: var(--c-primary);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--c-cyan, #00a3ff) 18%, transparent);
+  }
+
+  .event-map__preview-icon {
+    flex-shrink: 0;
+    color: var(--c-primary);
+    margin-top: 2px;
+  }
+
+  .event-map__preview-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .event-map__preview-venue {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--c-navy, #0e2744);
+    overflow-wrap: anywhere;
+  }
+
+  .event-map__preview-label {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--c-text);
+    overflow-wrap: anywhere;
+  }
+
+  .event-map__preview-hint {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-primary);
+    margin-top: 2px;
+  }
+
+  .event-map__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+
+  .event-map__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 8px 14px;
+    border-radius: var(--r-sm, 6px);
+    border: 1px solid var(--c-border);
+    background: var(--c-white, #fff);
+    color: var(--c-navy, #0e2744);
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    line-height: 1.3;
+  }
+
+  .event-map__link:hover {
+    border-color: var(--c-primary);
+    color: var(--c-primary-dk);
+  }
+
+  .event-map__link--primary {
+    background: var(--c-primary);
+    border-color: var(--c-primary);
+    color: #fff;
+  }
+
+  .event-map__link--primary:hover {
+    background: var(--c-primary-dk);
+    border-color: var(--c-primary-dk);
+    color: #fff;
+  }
+
+  @media (max-width: 480px) {
+    .event-map__actions {
+      flex-direction: column;
+    }
+
+    .event-map__link {
+      width: 100%;
+    }
+  }
+</style>

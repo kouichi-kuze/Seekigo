@@ -25,6 +25,12 @@ export const FIELD_REVIEW_SENSITIVE_FIELDS = [
   'end_date',
   'official_url',
   'category',
+  'is_free',
+  'reservation_status',
+  'family_friendly',
+  'venue_type',
+  'latitude',
+  'longitude',
 ] as const
 
 export type FieldReviewStatusFilter = 'pending' | 'accepted' | 'rejected'

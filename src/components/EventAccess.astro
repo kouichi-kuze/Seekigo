@@ -1,0 +1,167 @@
+---
+/**
+ * 公開イベント詳細: アクセス（最寄駅・徒歩・補足・駐車場）+ 会場マップ。
+ */
+import {
+  buildAccessSection,
+  type VisitDisplayEvent,
+} from '../lib/event-visit-display'
+import {
+  buildAccessSectionEn,
+  EVENT_UI_EN,
+} from '../lib/i18n/event-en'
+import type { SiteLocale } from '../lib/i18n/locale'
+import { getEventMapDestination, type EventMapInput } from '../lib/event-map'
+import EventMap from './EventMap.astro'
+
+interface Props {
+  event: VisitDisplayEvent & EventMapInput
+  locale?: SiteLocale
+  /** Published EN free-text supplements (locale=en only) */
+  accessTextEn?: string | null
+  parkingTextEn?: string | null
+}
+
+const {
+  event,
+  locale = 'ja',
+  accessTextEn = null,
+  parkingTextEn = null,
+} = Astro.props
+const access =
+  locale === 'en'
+    ? buildAccessSectionEn(event, { accessTextEn, parkingTextEn })
+    : buildAccessSection(event)
+const hasMap = Boolean(getEventMapDestination(event))
+const showSection = Boolean(access || hasMap)
+
+const L =
+  locale === 'en'
+    ? {
+        access: EVENT_UI_EN.access,
+        nearest: EVENT_UI_EN.nearestStation,
+        from: EVENT_UI_EN.fromStation,
+        accessDetail: EVENT_UI_EN.access,
+        parking: EVENT_UI_EN.parking,
+      }
+    : {
+        access: 'アクセス',
+        nearest: '最寄駅',
+        from: '駅から',
+        accessDetail: 'アクセス',
+        parking: '駐車場',
+      }
+---
+
+{
+  showSection && (
+    <section class="event-access" aria-labelledby="event-access-heading">
+      <h2 id="event-access-heading" class="event-access__heading">
+        {L.access}
+      </h2>
+
+      {
+        access && (
+          <dl class="event-access__list">
+            {access.nearestStation && (
+              <div class="event-access__row">
+                <dt>{L.nearest}</dt>
+                <dd lang={locale === 'en' ? 'ja' : undefined}>
+                  {access.nearestStation}
+                </dd>
+              </div>
+            )}
+            {access.walkLabel && (
+              <div class="event-access__row">
+                <dt>{L.from}</dt>
+                <dd>{access.walkLabel}</dd>
+              </div>
+            )}
+            {access.accessText && (
+              <div class="event-access__row">
+                <dt>{L.accessDetail}</dt>
+                <dd>{access.accessText}</dd>
+              </div>
+            )}
+            {(access.parkingLabel || access.parkingText) && (
+              <div class="event-access__row">
+                <dt>{L.parking}</dt>
+                <dd>
+                  {access.parkingLabel && (
+                    <span class="event-access__parking-status">
+                      {access.parkingLabel}
+                    </span>
+                  )}
+                  {access.parkingText && (
+                    <span class="event-access__parking-note">{access.parkingText}</span>
+                  )}
+                </dd>
+              </div>
+            )}
+          </dl>
+        )
+      }
+
+      <EventMap event={event} locale={locale} />
+    </section>
+  )
+}
+
+<style>
+  .event-access {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .event-access__heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--c-text);
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--c-primary);
+    align-self: flex-start;
+  }
+
+  .event-access__list {
+    margin: 0;
+    padding: 16px 18px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-white, #fff);
+  }
+
+  .event-access__row {
+    display: grid;
+    grid-template-columns: minmax(5rem, 7.5rem) 1fr;
+    gap: 12px;
+    padding: 10px 0;
+    align-items: start;
+  }
+
+  .event-access__row + .event-access__row {
+    border-top: 1px solid var(--c-border);
+  }
+
+  .event-access__row dt {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--c-muted);
+  }
+
+  .event-access__row dd {
+    margin: 0;
+    font-size: 14px;
+    color: var(--c-text);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .event-access__parking-note {
+    font-size: 13px;
+    color: var(--c-muted);
+  }
+</style>

@@ -14,6 +14,16 @@ import {
   isImageUsageStatus,
 } from './event-image-usage'
 import { normalizeHmToDb } from './event-time-rules'
+import {
+  FRIENDLY_VALUES,
+  PARKING_STATUSES,
+  RESERVATION_STATUSES,
+  VENUE_TYPES,
+  parseEnumValue,
+  parseOptionalInt,
+  parseOptionalNumber,
+  parseTriBool,
+} from './event-visit-attrs'
 
 type AdminCookies = {
   get: (name: string) => { value: string } | undefined
@@ -117,6 +127,51 @@ export async function processAdminEventEditPost(opts: {
     area: emptyToNull(String(form.get('area') ?? '')),
     address: emptyToNull(String(form.get('address') ?? '')),
     price_text: emptyToNull(String(form.get('price_text') ?? '')),
+    is_free: parseTriBool(String(form.get('is_free') ?? '')),
+    price_min: parseOptionalInt(String(form.get('price_min') ?? '')),
+    price_max: parseOptionalInt(String(form.get('price_max') ?? '')),
+    reservation_status: parseEnumValue(
+      String(form.get('reservation_status') ?? ''),
+      RESERVATION_STATUSES,
+    ),
+    reservation_url: emptyToNull(String(form.get('reservation_url') ?? '')),
+    nearest_station: emptyToNull(String(form.get('nearest_station') ?? '')),
+    access_text: emptyToNull(String(form.get('access_text') ?? '')),
+    walk_minutes: parseOptionalInt(String(form.get('walk_minutes') ?? '')),
+    latitude: parseOptionalNumber(String(form.get('latitude') ?? '')),
+    longitude: parseOptionalNumber(String(form.get('longitude') ?? '')),
+    venue_type: parseEnumValue(
+      String(form.get('venue_type') ?? ''),
+      VENUE_TYPES,
+    ),
+    family_friendly: parseEnumValue(
+      String(form.get('family_friendly') ?? ''),
+      FRIENDLY_VALUES,
+    ),
+    date_friendly: parseEnumValue(
+      String(form.get('date_friendly') ?? ''),
+      FRIENDLY_VALUES,
+    ),
+    solo_friendly: parseEnumValue(
+      String(form.get('solo_friendly') ?? ''),
+      FRIENDLY_VALUES,
+    ),
+    rain_friendly: parseEnumValue(
+      String(form.get('rain_friendly') ?? ''),
+      FRIENDLY_VALUES,
+    ),
+    age_note: emptyToNull(String(form.get('age_note') ?? '')),
+    duration_minutes_min: parseOptionalInt(
+      String(form.get('duration_minutes_min') ?? ''),
+    ),
+    duration_minutes_max: parseOptionalInt(
+      String(form.get('duration_minutes_max') ?? ''),
+    ),
+    parking_status: parseEnumValue(
+      String(form.get('parking_status') ?? ''),
+      PARKING_STATUSES,
+    ),
+    parking_text: emptyToNull(String(form.get('parking_text') ?? '')),
     category: parseCategoryInput(String(form.get('category') ?? '')),
     official_url: emptyToNull(String(form.get('official_url') ?? '')),
     summary: emptyToNull(String(form.get('summary') ?? '')),

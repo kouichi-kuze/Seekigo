@@ -1,4 +1,7 @@
 /** Admin 画面共通の events 行型 */
+import type { EventVisitAttrs } from '../event-visit-attrs'
+import { EVENT_VISIT_ATTR_COLUMNS } from '../event-visit-attrs'
+
 export type AdminEvent = {
   id: number | string
   title: string | null
@@ -21,10 +24,12 @@ export type AdminEvent = {
   image_source?: string | null
   image_credit?: string | null
   updated_at?: string | null
-}
+} & EventVisitAttrs
+
+const VISIT_ATTR_SELECT = EVENT_VISIT_ATTR_COLUMNS.join(', ')
 
 export const ADMIN_EVENT_SELECT =
-  'id, title, slug, area, start_date, end_date, start_time, end_time, venue, address, category, summary, source_url, official_url, price_text, status, image_url, image_usage_status, image_source, image_credit, updated_at'
+  `id, title, slug, area, start_date, end_date, start_time, end_time, venue, address, category, summary, source_url, official_url, price_text, status, image_url, image_usage_status, image_source, image_credit, updated_at, ${VISIT_ATTR_SELECT}`
 
 export const ADMIN_EVENT_SELECT_BASE =
   'id, title, slug, area, start_date, end_date, venue, address, category, summary, source_url, official_url, status'

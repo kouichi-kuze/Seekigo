@@ -8,7 +8,6 @@
  * - 同 field で別 proposal が来た場合: 旧 pending を expired → 新規 pending
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { EventSourceName } from '../../src/lib/event-sources'
 import {
   computeFieldDiffs,
   type FieldDiff,
@@ -35,7 +34,7 @@ const EMPTY_RESULT: SyncFieldReviewsResult = {
 }
 
 const EVENT_SELECT_FOR_DIFF =
-  'id, status, start_date, end_date, start_time, end_time, venue, area, address, price_text, is_free, category, official_url'
+  'id, status, start_date, end_date, start_time, end_time, venue, area, address, price_text, is_free, price_min, price_max, category, official_url, reservation_status, reservation_url, nearest_station, access_text, walk_minutes, latitude, longitude, venue_type, family_friendly, date_friendly, solo_friendly, rain_friendly, age_note, duration_minutes_min, duration_minutes_max, parking_status, parking_text'
 
 function logFieldReview(
   kind: string,
@@ -46,6 +45,24 @@ function logFieldReview(
     if (v === undefined) continue
     console.log(`${k}: ${v == null ? 'null' : String(v)}`)
   }
+}
+
+function asInt(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) && Number.isInteger(n) ? n : null
+}
+
+function asNum(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function asTextEnum(v: unknown): string | null {
+  if (v == null) return null
+  const s = String(v).trim()
+  return s || null
 }
 
 function snapshotFromEventRow(row: Record<string, unknown>): FieldSnapshot {
@@ -60,8 +77,27 @@ function snapshotFromEventRow(row: Record<string, unknown>): FieldSnapshot {
     price_text: (row.price_text as string | null) ?? null,
     is_free:
       row.is_free === true || row.is_free === false ? row.is_free : null,
+    price_min: asInt(row.price_min),
+    price_max: asInt(row.price_max),
     category: Array.isArray(row.category) ? (row.category as string[]) : null,
     official_url: (row.official_url as string | null) ?? null,
+    reservation_status: asTextEnum(row.reservation_status) as FieldSnapshot['reservation_status'],
+    reservation_url: (row.reservation_url as string | null) ?? null,
+    nearest_station: (row.nearest_station as string | null) ?? null,
+    access_text: (row.access_text as string | null) ?? null,
+    walk_minutes: asInt(row.walk_minutes),
+    latitude: asNum(row.latitude),
+    longitude: asNum(row.longitude),
+    venue_type: asTextEnum(row.venue_type) as FieldSnapshot['venue_type'],
+    family_friendly: asTextEnum(row.family_friendly) as FieldSnapshot['family_friendly'],
+    date_friendly: asTextEnum(row.date_friendly) as FieldSnapshot['date_friendly'],
+    solo_friendly: asTextEnum(row.solo_friendly) as FieldSnapshot['solo_friendly'],
+    rain_friendly: asTextEnum(row.rain_friendly) as FieldSnapshot['rain_friendly'],
+    age_note: (row.age_note as string | null) ?? null,
+    duration_minutes_min: asInt(row.duration_minutes_min),
+    duration_minutes_max: asInt(row.duration_minutes_max),
+    parking_status: asTextEnum(row.parking_status) as FieldSnapshot['parking_status'],
+    parking_text: (row.parking_text as string | null) ?? null,
   }
 }
 
@@ -106,7 +142,7 @@ async function processOneDiff(
   write: boolean,
   opts: {
     eventId: number
-    sourceName: EventSourceName
+    sourceName: string
     sourceUrl: string | null
     diff: FieldDiff
   },
@@ -244,7 +280,8 @@ export async function syncFieldReviewsForPublishedEvent(
   opts: {
     eventId: number
     eventStatus: string | null | undefined
-    sourceName: EventSourceName
+    /** gotokyo / enjoytokyo / walkerplus / official_web など */
+    sourceName: string
     sourceUrl: string | null
     proposed: FieldSnapshot
     /** false = DRY_RUN（DB 非接触） */
@@ -253,7 +290,7 @@ export async function syncFieldReviewsForPublishedEvent(
 ): Promise<SyncFieldReviewsResult> {
   const tally: SyncFieldReviewsResult = { ...EMPTY_RESULT }
 
-  if (opts.eventStatus !== 'published') {
+  if (opts.eventStatus !== 'published' && opts.eventStatus !== 'hidden') {
     return tally
   }
 

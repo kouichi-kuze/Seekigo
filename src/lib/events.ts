@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import type { EventVisitAttrs } from './event-visit-attrs'
 
 /** events テーブルの一覧・詳細表示用フィールド */
 export type Event = {
@@ -22,7 +23,7 @@ export type Event = {
   official_url: string | null
   status?: string
   [key: string]: unknown
-}
+} & EventVisitAttrs
 
 /** 一覧ページ向けの追加フィルタ（必要に応じて拡張する） */
 export type EventFilters = {

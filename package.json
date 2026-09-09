@@ -25,6 +25,8 @@
     "collect:reaction-web": "tsx scripts/collect-reaction-web.ts",
     "collect:reaction-x": "tsx scripts/collect-reaction-x.ts",
     "summarize:reaction": "tsx scripts/summarize-reaction.ts",
+    "enrich:event-visit": "tsx scripts/enrich-event-visit-attrs.ts",
+    "translate:event": "tsx scripts/translate-event.ts",
     "brand:export": "tsx scripts/export-brand-assets.ts"
   },
   "dependencies": {

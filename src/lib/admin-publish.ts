@@ -11,6 +11,10 @@ import { processAdminEventEditPost } from './admin-event-edit'
 import { processAdminHidePost } from './admin-hide'
 import { processAdminDeletePost } from './admin-delete'
 import { processAdminReactionSummaryPost } from './admin-reaction-summary'
+import {
+  isTranslationIntent,
+  processAdminEventTranslatePost,
+} from './admin-event-translate'
 
 type AdminCookies = {
   get: (name: string) => { value: string } | undefined
@@ -66,6 +70,10 @@ export async function processAdminPublishPost(opts: {
     intent === 'reaction_ai_generate'
   ) {
     return processAdminReactionSummaryPost({ request, url, cookies, form })
+  }
+
+  if (isTranslationIntent(intent)) {
+    return processAdminEventTranslatePost({ request, url, cookies, form })
   }
 
   if (intent === 'hide_event' || intent === 'unhide_event') {
