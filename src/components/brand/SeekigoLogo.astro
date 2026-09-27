@@ -1,7 +1,4 @@
 ---
-import SeekigoSymbol from './SeekigoSymbol.astro'
-import SeekigoWordmark from './SeekigoWordmark.astro'
-
 interface Props {
   size?: 'header' | 'hero' | 'footer'
   href?: string | null
@@ -16,8 +13,7 @@ const Tag = href ? 'a' : 'span'
   href={href ?? undefined}
   aria-label="Seekigo ホーム"
 >
-  <SeekigoSymbol class="seekigo-logo__symbol" />
-  <SeekigoWordmark />
+  <img src="/brand/logo_seekigo.png" alt="" width="1024" height="256" />
 </Tag>
 
 <style>
@@ -30,31 +26,26 @@ const Tag = href ? 'a' : 'span'
     flex-shrink: 0;
     min-width: 0;
   }
-  .seekigo-logo--header {
-    font-size: 22px;
+  .seekigo-logo img {
+    display: block;
+    width: auto;
+    height: 36px;
+    max-width: 100%;
+    object-fit: contain;
   }
-  .seekigo-logo--hero {
-    font-size: clamp(40px, 7vw, 64px);
+  .seekigo-logo--header img {
+    height: 36px;
   }
-  .seekigo-logo--footer {
-    font-size: 16px;
+  .seekigo-logo--hero img {
+    height: clamp(48px, 8vw, 72px);
   }
-  .seekigo-logo__symbol {
-    width: 1.15em;
-    height: auto;
-    flex-shrink: 0;
+  .seekigo-logo--footer img {
+    height: 22px;
   }
 
   @media (max-width: 719px) {
-    .seekigo-logo--header {
-      font-size: 18px;
-      gap: 0.32em;
-    }
-  }
-
-  @media (max-width: 359px) {
-    .seekigo-logo--header {
-      font-size: 16px;
+    .seekigo-logo--header img {
+      height: 30px;
     }
   }
 </style>
