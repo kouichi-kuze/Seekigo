@@ -1,13 +1,15 @@
 /**
- * 全ソース一括同期（GO TOKYO → EnjoyTokyo）
+ * 全ソース一括同期（GO TOKYO → EnjoyTokyo → Walkerplus）
  *
  * 1) npm run sync:gotokyo 相当
  * 2) EnjoyTokyo: listing → details → dedupe → import → AI enrichment
+ * 3) Walkerplus: listing → details → import
  *
  * - shell:false（scripts/lib/run-tsx.ts）
  * - 失敗時は即停止 exit 1
  * - DRY_RUN デフォルト true（子プロセスへ継承）
  */
+
 import { config } from 'dotenv'
 import { runTsxScript } from './lib/run-tsx'
 
@@ -49,11 +51,29 @@ const SOURCES: Source[] = [
       },
     ],
   },
+  {
+    name: 'Walkerplus',
+    steps: [
+      {
+        label: 'Step 1/3 listing',
+        script: 'scripts/fetch-walkerplus.ts',
+      },
+      {
+        label: 'Step 2/3 details',
+        script: 'scripts/fetch-walkerplus-details.ts',
+      },
+      {
+        label: 'Step 3/3 import',
+        script: 'scripts/import-walkerplus-supabase.ts',
+      },
+    ],
+  },
 ]
 
 async function main() {
   console.log('[sync-all] start')
   console.log(`[sync-all] DRY_RUN: ${DRY_RUN}`)
+
   if (DRY_RUN) {
     console.log(
       '[sync-all] note: import / AI update are dry-run (no DB write). Set DRY_RUN=false to write drafts.',
@@ -66,26 +86,37 @@ async function main() {
 
   const childEnv = {
     DRY_RUN: DRY_RUN ? 'true' : 'false',
-    // 一覧最大10件に合わせて詳細も取得（個別指定があればそれを優先）
+
+    // EnjoyTokyo: 一覧最大10件に合わせて詳細も取得
+    // 個別指定があればそれを優先
     ENJOYTOKYO_DETAILS_LIMIT:
       process.env.ENJOYTOKYO_DETAILS_LIMIT?.trim() || '10',
   }
 
   for (let s = 0; s < SOURCES.length; s++) {
     const source = SOURCES[s]
+
     console.log('')
-    console.log(`[sync-all] Source ${s + 1}/${SOURCES.length}: ${source.name}`)
+    console.log(
+      `[sync-all] Source ${s + 1}/${SOURCES.length}: ${source.name}`,
+    )
 
     for (const step of source.steps) {
       console.log(`[sync-all] ${step.label}`)
+
       try {
         await runTsxScript(step.script, childEnv)
         console.log(`[sync-all] ${step.label} — success`)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message =
+          error instanceof Error ? error.message : String(error)
+
         console.error(`[sync-all] ${step.label} — failed`)
         console.error(`[sync-all] ${message}`)
-        console.error('[sync-all] stopped (subsequent steps were not run)')
+        console.error(
+          '[sync-all] stopped (subsequent steps were not run)',
+        )
+
         process.exit(1)
       }
     }
