@@ -69,12 +69,16 @@ const SOURCES: Source[] = [
     name: 'Minato',
     steps: [
       {
-        label: 'Step 1/2 listing',
+        label: 'fetch Minato OpenData',
         script: 'scripts/fetch-minato-opendata.ts',
       },
       {
-        label: 'Step 2/2 import',
+        label: 'import Minato OpenData',
         script: 'scripts/import-minato-opendata-supabase.ts',
+      },
+      {
+        label: 'enrich Minato OpenData',
+        script: 'scripts/enrich-minato-opendata.ts',
       },
     ],
   },
