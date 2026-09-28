@@ -302,7 +302,6 @@ async function main() {
       const { data, error } = await supabase
         .from('events')
         .update({
-          area: resolved.area,
           is_free: resolved.is_free,
           is_indoor: ai.is_indoor.value,
           is_kids: ai.is_kids.value,

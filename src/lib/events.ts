@@ -91,7 +91,37 @@ export function getKidsEvents(): Promise<Event[]> {
   return getPublishedEvents({ isKids: true })
 }
 
-/** エリア別イベント（例: shinjuku / shibuya） */
+function isPlaceSlug(value: string): boolean {
+  return /^[a-z0-9-]+$/.test(value)
+}
+
+/**
+ * 自治体ページ用。区市町村スラッグで公開イベントを返す。
+ * municipality 未設定の既存行だけ、area が同じ自治体スラッグのとき含める。
+ * municipality が別の自治体なら、古い area だけでは入れない。
+ */
+export async function getMunicipalityEvents(
+  municipality: string,
+): Promise<Event[]> {
+  const slug = municipality.trim().toLowerCase()
+  if (!isPlaceSlug(slug)) return []
+
+  const { data, error } = await supabase
+    .from('events')
+    .select('*')
+    .eq('status', 'published')
+    .or(`municipality.eq.${slug},and(municipality.is.null,area.eq.${slug})`)
+    .order('start_date', { ascending: true })
+
+  if (error) {
+    console.error(error)
+    return []
+  }
+
+  return (data ?? []) as Event[]
+}
+
+/** 街ページ用。area が六本木・原宿などの街スラッグの公開イベント。 */
 export function getAreaEvents(area: string): Promise<Event[]> {
   return getPublishedEvents({ area })
 }

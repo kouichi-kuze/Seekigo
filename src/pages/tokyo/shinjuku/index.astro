@@ -1,9 +1,9 @@
 ---
 import Layout from '../../../layouts/Layout.astro'
 import EventListPage from '../../../components/EventListPage.astro'
-import { getAreaEvents } from '../../../lib/events'
+import { getMunicipalityEvents } from '../../../lib/events'
 
-const events = await getAreaEvents('shinjuku')
+const events = await getMunicipalityEvents('shinjuku')
 ---
 
 <Layout

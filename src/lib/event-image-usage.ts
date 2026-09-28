@@ -96,6 +96,7 @@ export type EventDisplayImage =
  * C. カテゴリ不明 → generic
  */
 export function resolveEventDisplayImage(event: {
+  id?: number | string | null
   image_url?: string | null
   image_usage_status?: string | null
   image_credit?: string | null
@@ -111,17 +112,18 @@ export function resolveEventDisplayImage(event: {
   }
 
   const categorySlug = resolveImageCategorySlug(event.category)
+  const src = getCategoryImagePath(categorySlug, event.id)
   if (categorySlug === GENERIC_IMAGE_CATEGORY_SLUG) {
     return {
       kind: 'generic',
-      src: getCategoryImagePath(GENERIC_IMAGE_CATEGORY_SLUG),
+      src,
       categorySlug: GENERIC_IMAGE_CATEGORY_SLUG,
     }
   }
 
   return {
     kind: 'category',
-    src: getCategoryImagePath(categorySlug),
+    src,
     categorySlug,
   }
 }

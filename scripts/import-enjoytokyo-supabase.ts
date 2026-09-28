@@ -25,6 +25,7 @@ import {
   cleanAddressAccess,
   inferIsFreeFromPriceText,
   resolveAreaSlug,
+  resolveEventPlace,
 } from '../src/lib/event-field-rules'
 import { normalizeHmToDb } from '../src/lib/event-time-rules'
 import { defaultImageMetaForSource } from '../src/lib/event-image-usage'
@@ -204,6 +205,7 @@ type NewEventRow = {
   source_url: string
   venue: string | null
   area: string | null
+  municipality: string | null
   address: string | null
   start_date: string
   end_date: string | null
@@ -257,8 +259,8 @@ function validateNewDraft(
   const address =
     cleanAddressAccess(detail.address) ??
     (typeof detail.address === 'string' ? detail.address.trim() || null : null)
-  const area = resolveImportArea({
-    area: detail.area,
+  const place = resolveEventPlace({
+    areaHint: detail.area,
     address,
     venue: detail.venue,
   })
@@ -273,7 +275,8 @@ function validateNewDraft(
       official_url: detail.official_url ?? null,
       source_url: detail.source_url.trim(),
       venue: detail.venue ?? null,
-      area,
+      area: place.area,
+      municipality: place.municipality,
       address,
       start_date: detail.start_date,
       end_date: detail.end_date ?? null,
@@ -372,8 +375,7 @@ async function updateDraftBody(
     updated_at: new Date().toISOString(),
   }
 
-  // deterministic で取れた場合のみ area / is_free を更新（null で AI 結果を消さない）
-  if (row.area) patch.area = row.area
+  // 既存 draft の area / municipality は同期で書き換えない
   if (row.is_free !== null) patch.is_free = row.is_free
   if (imageChanged) {
     patch.image_usage_status = 'unknown'
@@ -731,7 +733,9 @@ async function main() {
         if (!writeClient) {
           summary.new_events += 1
           summary.new_sources += 1
-          console.log(`${LOG} would insert new draft + source`)
+          console.log(
+            `${LOG} would insert new draft + source municipality=${validated.row.municipality} area=${validated.row.area}`,
+          )
           continue
         }
 

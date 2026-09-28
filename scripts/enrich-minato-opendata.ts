@@ -522,6 +522,7 @@ async function main() {
     const currentSummary = textOrNull(event.summary)
     const planned: Planned = {
       ...facts,
+      area: event.area,
       category: currentCategory.length > 0 ? currentCategory : ai.category,
       summary: currentSummary ?? groundedSummary(ai.summary, event, source),
     }
@@ -553,7 +554,6 @@ async function main() {
         latitude: planned.latitude,
         longitude: planned.longitude,
         price_text: planned.price_text,
-        area: planned.area,
         is_free: planned.is_free,
         is_indoor: planned.is_indoor,
         is_kids: planned.is_kids,

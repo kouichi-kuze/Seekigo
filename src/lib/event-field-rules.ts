@@ -276,3 +276,151 @@ export function inferIsFreeFromPriceText(
 
   return null
 }
+
+/**
+ * 街スラッグ → 自治体スラッグ。
+ * お台場・池袋・王子・吉祥寺は自治体が一つに決まらないため含めない。
+ */
+export const NEIGHBORHOOD_TO_MUNICIPALITY: Record<string, string> = {
+  roppongi: 'minato',
+  ginza: 'chuo',
+  asakusa: 'taito',
+  ueno: 'taito',
+  harajuku: 'shibuya',
+  koenji: 'suginami',
+}
+
+/** 区・市として municipality に入れてよいスラッグ。街スラッグは含めない。 */
+export const MUNICIPALITY_SLUGS = [
+  'arakawa',
+  'chuo',
+  'higashiyamato',
+  'machida',
+  'meguro',
+  'minato',
+  'shibuya',
+  'shinjuku',
+  'sumida',
+  'taito',
+  'tama',
+  'yokohama',
+  'koto',
+  'setagaya',
+  'ota',
+  'suginami',
+  'shinagawa',
+  'nerima',
+] as const
+
+/** 今回の自動バックフィルから外す area。 */
+export const MUNICIPALITY_REVIEW_AREA_SLUGS = [
+  'odaiba',
+  'ikebukuro',
+  'oji',
+  'kichijoji',
+] as const
+
+const MUNICIPALITY_SLUG_SET = new Set<string>(MUNICIPALITY_SLUGS)
+const REVIEW_AREA_SET = new Set<string>(MUNICIPALITY_REVIEW_AREA_SLUGS)
+
+/** 住所に明示された区市町村だけ。タイトルや会場名では判定しない。 */
+const ADDRESS_MUNICIPALITY_PATTERNS: Array<{ re: RegExp; slug: string }> = [
+  { re: /東大和市/, slug: 'higashiyamato' },
+  { re: /横浜市/, slug: 'yokohama' },
+  { re: /町田市/, slug: 'machida' },
+  { re: /多摩市/, slug: 'tama' },
+  { re: /江東区/, slug: 'koto' },
+  { re: /世田谷区/, slug: 'setagaya' },
+  { re: /杉並区/, slug: 'suginami' },
+  { re: /品川区/, slug: 'shinagawa' },
+  { re: /練馬区/, slug: 'nerima' },
+  { re: /大田区/, slug: 'ota' },
+  { re: /渋谷区/, slug: 'shibuya' },
+  { re: /新宿区/, slug: 'shinjuku' },
+  { re: /中央区/, slug: 'chuo' },
+  { re: /台東区/, slug: 'taito' },
+  { re: /墨田区/, slug: 'sumida' },
+  { re: /目黒区/, slug: 'meguro' },
+  { re: /荒川区/, slug: 'arakawa' },
+  { re: /港区/, slug: 'minato' },
+]
+
+function municipalityFromAddress(address: string | null | undefined): string | null {
+  const text = normalizeLookupText(address)
+  if (!text) return null
+  const found = new Set<string>()
+  for (const { re, slug } of ADDRESS_MUNICIPALITY_PATTERNS) {
+    if (re.test(text)) found.add(slug)
+  }
+  if (found.size !== 1) return null
+  return [...found][0]
+}
+
+/**
+ * municipality だけ返す。area 列は変更しない。
+ * 要確認の街、未知スラッグ、住所から自治体が一つに決まらない場合は null。
+ */
+export function inferMunicipalitySlug(input: {
+  area?: string | null
+  address?: string | null
+}): string | null {
+  const area = input.area?.trim().toLowerCase() || null
+  if (area) {
+    const fromNeighborhood = NEIGHBORHOOD_TO_MUNICIPALITY[area]
+    if (fromNeighborhood) return fromNeighborhood
+    if (REVIEW_AREA_SET.has(area)) return null
+    if (MUNICIPALITY_SLUG_SET.has(area)) return area
+    return null
+  }
+  return municipalityFromAddress(input.address)
+}
+
+export type EventPlace = {
+  municipality: string | null
+  /** 街スラッグ。区市町村だけ分かるときは null。自治体スラッグは入れない。 */
+  area: string | null
+  /** resolveAreaSlug の従来結果。dedupe と比較用。新規 area には使わない。 */
+  legacyArea: string | null
+}
+
+/**
+ * 新規イベント用。municipality と街 area を分ける。
+ * 会場・住所で街が分かるときはそれを優先し、区だけのときは area を空にする。
+ */
+export function resolveEventPlace(input: ResolveAreaInput): EventPlace {
+  const legacyArea = resolveAreaSlug(input)
+  const fromVenue = resolveAreaSlug({
+    address: input.address,
+    venue: input.venue,
+  })
+  const neighborhood =
+    (fromVenue && NEIGHBORHOOD_TO_MUNICIPALITY[fromVenue] ? fromVenue : null) ??
+    (legacyArea && NEIGHBORHOOD_TO_MUNICIPALITY[legacyArea] ? legacyArea : null)
+
+  if (neighborhood) {
+    return {
+      municipality: NEIGHBORHOOD_TO_MUNICIPALITY[neighborhood],
+      area: neighborhood,
+      legacyArea,
+    }
+  }
+
+  if (legacyArea && MUNICIPALITY_SLUG_SET.has(legacyArea)) {
+    return { municipality: legacyArea, area: null, legacyArea }
+  }
+  if (fromVenue && MUNICIPALITY_SLUG_SET.has(fromVenue)) {
+    return { municipality: fromVenue, area: null, legacyArea }
+  }
+  if (legacyArea && REVIEW_AREA_SET.has(legacyArea)) {
+    return { municipality: null, area: legacyArea, legacyArea }
+  }
+  if (fromVenue && REVIEW_AREA_SET.has(fromVenue)) {
+    return { municipality: null, area: fromVenue, legacyArea }
+  }
+
+  return {
+    municipality: inferMunicipalitySlug({ area: null, address: input.address }),
+    area: null,
+    legacyArea,
+  }
+}

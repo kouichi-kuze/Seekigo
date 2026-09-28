@@ -20,6 +20,7 @@ import {
   type DuplicateStatus,
 } from '../src/lib/event-dedupe'
 import { isBodyProtectedFromSync } from '../src/lib/event-status'
+import { resolveEventPlace } from '../src/lib/event-field-rules'
 import { syncFieldReviewsForPublishedEvent } from './lib/field-reviews'
 import type {
   MinatoAreaStatus,
@@ -600,6 +601,22 @@ async function main() {
       ].join('\t'),
     )
 
+    const place = resolveEventPlace({
+      venue: event.venue_name,
+      address: event.address,
+    })
+    const municipality =
+      event.area_status === 'minato' ? 'minato' : place.municipality
+    const area =
+      event.area_status === 'minato'
+        ? place.municipality === 'minato'
+          ? place.area
+          : null
+        : place.area
+    console.log(
+      `${LOG} draft place municipality=${municipality} area=${area} title=${event.title}`,
+    )
+
     if (!write) continue
 
     const slug = buildSlug(event.source_url, dates.start_date)
@@ -612,7 +629,8 @@ async function main() {
         source_url: event.source_url,
         official_url: event.official_url,
         venue: event.venue_name,
-        area: event.area_status === 'minato' ? 'minato' : null,
+        municipality,
+        area,
         address: null,
         start_date: dates.start_date,
         end_date: dates.end_date,

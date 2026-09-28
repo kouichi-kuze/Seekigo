@@ -77,6 +77,7 @@ async function updateOneEventImageUsage(
   if (updErr) throw updErr
 
   const display_image = resolveEventDisplayImage({
+    id: eventId,
     image_url: existing.image_url,
     image_usage_status: status,
     image_credit: credit,

@@ -18,7 +18,7 @@ import { getGotokyoLimit } from './lib/gotokyo-limit'
 import {
   cleanAddressAccess,
   inferIsFreeFromPriceText,
-  resolveAreaSlug,
+  resolveEventPlace,
 } from '../src/lib/event-field-rules'
 import { normalizeHmToDb } from '../src/lib/event-time-rules'
 import {
@@ -88,6 +88,9 @@ type EventRow = {
   source_url: string
   venue: string | null
   area: string | null
+  municipality: string | null
+  /** DB には書かない。重複判定と published の差分レビュー用。 */
+  dedupeArea: string | null
   address: string | null
   start_date: string
   end_date: string | null
@@ -123,12 +126,9 @@ function isBlank(value: unknown): boolean {
   return value === null || value === undefined || value === ''
 }
 
-function normalizeArea(area: unknown): string | null {
-  if (typeof area !== 'string') return null
-  const trimmed = area.trim().toLowerCase()
-  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null
-  if (!/^[a-z0-9-]+$/.test(trimmed)) return null
-  return trimmed
+function toEventInsert<T extends { dedupeArea?: string | null }>(row: T) {
+  const { dedupeArea: _dedupeArea, ...payload } = row
+  return payload
 }
 
 function normalizeNullableBoolean(value: unknown): boolean | null {
@@ -232,12 +232,11 @@ function validateEvent(
   const address =
     cleanAddressAccess(event.address) ??
     (typeof event.address === 'string' ? event.address.trim() || null : null)
-  const area =
-    resolveAreaSlug({
-      areaHint: typeof event.area === 'string' ? event.area : null,
-      address,
-      venue: event.venue,
-    }) ?? normalizeArea(event.area)
+  const place = resolveEventPlace({
+    areaHint: typeof event.area === 'string' ? event.area : null,
+    address,
+    venue: event.venue,
+  })
   const ruleIsFree = inferIsFreeFromPriceText(event.price_text)
   const is_free =
     ruleIsFree !== null
@@ -252,7 +251,9 @@ function validateEvent(
       official_url: event.official_url ?? null,
       source_url: event.source_url.trim(),
       venue: event.venue ?? null,
-      area,
+      area: place.area,
+      municipality: place.municipality,
+      dedupeArea: place.legacyArea,
       address,
       start_date,
       end_date: event.end_date ?? null,
@@ -431,7 +432,6 @@ async function updateDraftBody(
     last_checked_at: row.last_checked_at,
     updated_at: new Date().toISOString(),
   }
-  if (row.area) patch.area = row.area
   if (row.is_free !== null) patch.is_free = row.is_free
   if (imageChanged) {
     patch.image_usage_status = 'unknown'
@@ -543,7 +543,7 @@ async function main() {
         venue: row.venue,
         official_url: row.official_url,
         source_url: row.source_url,
-        area: row.area,
+        area: row.dedupeArea,
       },
       existing,
     )
@@ -574,7 +574,7 @@ async function main() {
                 start_time: row.start_time,
                 end_time: row.end_time,
                 venue: row.venue,
-                area: row.area,
+                area: row.dedupeArea,
                 official_url: row.official_url,
                 source_url: row.source_url,
                 price_text: row.price_text,
@@ -648,7 +648,7 @@ async function main() {
                   start_time: row.start_time,
                   end_time: row.end_time,
                   venue: row.venue,
-                  area: row.area,
+                  area: row.dedupeArea,
                   address: row.address,
                   price_text: row.price_text,
                   is_free: row.is_free,
@@ -747,13 +747,15 @@ async function main() {
       if (!writeClient) {
         summary.new_events += 1
         summary.new_sources += 1
-        console.log(`${LOG} would insert new draft + source slug=${row.slug}`)
+        console.log(
+          `${LOG} would insert new draft + source slug=${row.slug} municipality=${row.municipality} area=${row.area}`,
+        )
         continue
       }
 
       const { data: inserted, error: insErr } = await writeClient
         .from('events')
-        .insert(row)
+        .insert(toEventInsert(row))
         .select('id')
         .single()
 
@@ -778,7 +780,7 @@ async function main() {
         start_date: row.start_date,
         end_date: row.end_date,
         venue: row.venue,
-        area: row.area,
+        area: row.dedupeArea,
         official_url: row.official_url,
         source_url: row.source_url,
         status: 'draft',

@@ -320,6 +320,7 @@ function usageStatusOf(event: AdminEvent): string {
 
 function eventDisplayImage(event: AdminEvent) {
   return resolveEventDisplayImage({
+    id: event.id,
     image_url: event.image_url,
     image_usage_status: usageStatusOf(event),
     image_credit: event.image_credit,

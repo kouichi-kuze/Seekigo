@@ -15,6 +15,8 @@
     "enrich:gotokyo:ai": "tsx scripts/enrich-events-ai.ts",
     "enrich:enjoytokyo:ai": "tsx scripts/enrich-enjoytokyo-ai.ts",
     "enrich:minato": "tsx scripts/enrich-minato-opendata.ts",
+    "backfill:municipality": "tsx scripts/backfill-event-municipality.ts",
+    "backfill:municipality:confirmed": "tsx scripts/backfill-event-municipality-confirmed.ts",
     "import:gotokyo": "tsx scripts/import-events-supabase.ts",
     "sync:gotokyo": "tsx scripts/sync-gotokyo.ts",
     "sync:all": "tsx scripts/sync-all.ts",
