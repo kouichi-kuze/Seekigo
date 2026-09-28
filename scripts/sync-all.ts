@@ -1,13 +1,10 @@
 /**
- * 全ソース一括同期（GO TOKYO → EnjoyTokyo → Walkerplus）
- *
- * 1) npm run sync:gotokyo 相当
- * 2) EnjoyTokyo: listing → details → dedupe → import → AI enrichment
- * 3) Walkerplus: listing → details → import
+ * 全ソース一括同期（GO TOKYO → EnjoyTokyo → Walkerplus → 港区オープンデータ）
  *
  * - shell:false（scripts/lib/run-tsx.ts）
- * - 失敗時は即停止 exit 1
  * - DRY_RUN デフォルト true（子プロセスへ継承）
+ * - 1ソース内の失敗はそのソースの残ステップを止め、次のソースは続ける
+ * - いずれかが失敗したら最後に exit 1（GitHub Actions のデプロイには進まない）
  */
 
 import { config } from 'dotenv'
@@ -68,6 +65,19 @@ const SOURCES: Source[] = [
       },
     ],
   },
+  {
+    name: 'Minato',
+    steps: [
+      {
+        label: 'Step 1/2 listing',
+        script: 'scripts/fetch-minato-opendata.ts',
+      },
+      {
+        label: 'Step 2/2 import',
+        script: 'scripts/import-minato-opendata-supabase.ts',
+      },
+    ],
+  },
 ]
 
 async function main() {
@@ -93,8 +103,11 @@ async function main() {
       process.env.ENJOYTOKYO_DETAILS_LIMIT?.trim() || '10',
   }
 
+  let failedSources = 0
+
   for (let s = 0; s < SOURCES.length; s++) {
     const source = SOURCES[s]
+    let sourceFailed = false
 
     console.log('')
     console.log(
@@ -108,23 +121,30 @@ async function main() {
         await runTsxScript(step.script, childEnv)
         console.log(`[sync-all] ${step.label} — success`)
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error)
-
+        const message = error instanceof Error ? error.message : String(error)
+        sourceFailed = true
         console.error(`[sync-all] ${step.label} — failed`)
         console.error(`[sync-all] ${message}`)
         console.error(
-          '[sync-all] stopped (subsequent steps were not run)',
+          `[sync-all] ${source.name} stopped. Next sources will still run.`,
         )
-
-        process.exit(1)
+        break
       }
     }
 
-    console.log(`[sync-all] ${source.name} — success`)
+    if (sourceFailed) {
+      failedSources += 1
+      console.error(`[sync-all] ${source.name} — failed`)
+    } else {
+      console.log(`[sync-all] ${source.name} — success`)
+    }
   }
 
   console.log('')
+  if (failedSources > 0) {
+    console.error(`[sync-all] done with ${failedSources} failed source(s)`)
+    process.exit(1)
+  }
   console.log('[sync-all] done')
 }
 
