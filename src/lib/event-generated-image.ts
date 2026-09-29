@@ -163,7 +163,7 @@ async function markGeneratedImagePending(
 /**
  * イベント専用イメージを1件生成する。
  * 標準生成、追加指示、将来の一括生成はすべてこの関数を呼ぶ。
- * 一括生成は generated_image_status = none の行を順に渡し、customInstruction は付けない。
+ * 一括生成は対象条件を満たす ID だけを渡し、customInstruction は付けない。
  */
 export async function generateEventImage(
   client: SupabaseClient,
@@ -174,7 +174,7 @@ export async function generateEventImage(
   if ('error' in instruction) return { ok: false, message: instruction.error }
 
   const apiKey =
-    import.meta.env.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()
+    import.meta.env?.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()
   if (!apiKey) {
     return { ok: false, message: 'OPENAI_API_KEY が未設定です' }
   }

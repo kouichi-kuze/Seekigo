@@ -30,6 +30,7 @@
     "summarize:reaction": "tsx scripts/summarize-reaction.ts",
     "enrich:event-visit": "tsx scripts/enrich-event-visit-attrs.ts",
     "translate:event": "tsx scripts/translate-event.ts",
+    "generate:event-images": "tsx scripts/generate-event-images.ts",
     "brand:export": "tsx scripts/export-brand-assets.ts"
   },
   "dependencies": {
