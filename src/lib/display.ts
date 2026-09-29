@@ -19,6 +19,58 @@ export function formatAreaLabel(area: string | null | undefined): string | null 
   return AREA_LABELS[key] ?? area.trim()
 }
 
+/** AREA_LABELS に無い、既存の自治体スラッグ。機械翻訳ではなくスラッグの表示名。 */
+const MUNICIPALITY_PLACE_LABELS: Record<string, string> = {
+  bunkyo: '文京区',
+  chiyoda: '千代田区',
+  fuchu: '府中市',
+  kita: '北区',
+  kodaira: '小平市',
+  koganei: '小金井市',
+  koto: '江東区',
+  musashino: '武蔵野市',
+  nerima: '練馬区',
+  ota: '大田区',
+  setagaya: '世田谷区',
+  shinagawa: '品川区',
+  suginami: '杉並区',
+  tachikawa: '立川市',
+  toshima: '豊島区',
+  kichijoji: '吉祥寺',
+}
+
+function placePartLabel(
+  value: string | null | undefined,
+  omitRawSlug = false,
+): string | null {
+  if (!value?.trim()) return null
+  const raw = value.trim()
+  const key = raw.toLowerCase()
+  const known = AREA_LABELS[key] ?? MUNICIPALITY_PLACE_LABELS[key]
+  if (known) return known
+  if (omitRawSlug && /^[a-z0-9-]+$/i.test(raw)) return null
+  return raw
+}
+
+/**
+ * 区と街を一つにまとめる。同じ表示名は重ねない。
+ * 英訳辞書はないので、英語ページでもこの日本語名をそのまま使う。
+ */
+export function formatEventPlaceLine(
+  municipality: string | null | undefined,
+  area: string | null | undefined,
+  options?: { omitRawSlug?: boolean },
+): string | null {
+  const omitRawSlug = options?.omitRawSlug === true
+  const ward = placePartLabel(municipality, omitRawSlug)
+  const neighborhood = placePartLabel(area, omitRawSlug)
+  if (ward && neighborhood) {
+    if (ward === neighborhood) return ward
+    return `${ward}・${neighborhood}`
+  }
+  return ward ?? neighborhood
+}
+
 function parseYmd(ymd: string): {
   year: number
   month: number
@@ -66,8 +118,10 @@ function formatJaDay(
 export function formatEventDateRange(
   startDate: string | null | undefined,
   endDate: string | null | undefined,
+  options?: { omitStartYear?: boolean },
 ): string | null {
   if (!startDate) return null
+  const showStartYear = !options?.omitStartYear
 
   const start = parseYmd(startDate)
   if (!start) {
@@ -76,16 +130,16 @@ export function formatEventDateRange(
   }
 
   if (!endDate || endDate === startDate) {
-    return formatJaDay(start, true)
+    return formatJaDay(start, showStartYear)
   }
 
   const end = parseYmd(endDate)
   if (!end) {
-    return `${formatJaDay(start, true)} 〜 ${endDate}`
+    return `${formatJaDay(start, showStartYear)} 〜 ${endDate}`
   }
 
   const sameYear = start.year === end.year
-  return `${formatJaDay(start, true)}〜${formatJaDay(end, !sameYear)}`
+  return `${formatJaDay(start, showStartYear)}〜${formatJaDay(end, !sameYear)}`
 }
 
 /** Asia/Tokyo の今日（YYYY-MM-DD） */

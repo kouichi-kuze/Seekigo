@@ -115,8 +115,8 @@ export function extractFromJsonLd(
 
     if (freeOffer && !paidOffer) {
       proposals.push({
-        field: 'is_free',
-        proposed_value: true,
+        field: 'price_type',
+        proposed_value: 'free',
         confidence: 'high',
         reason: 'JSON-LD Offer price=0 / Free',
         evidence_text: clipEvidence('Offer indicates free admission'),
@@ -145,8 +145,8 @@ export function extractFromJsonLd(
       const min = Math.min(...prices)
       const max = Math.max(...prices)
       proposals.push({
-        field: 'is_free',
-        proposed_value: false,
+        field: 'price_type',
+        proposed_value: 'paid',
         confidence: 'high',
         reason: 'JSON-LD Offer price > 0',
         evidence_text: clipEvidence(`price ${min}${min !== max ? `-${max}` : ''}`),

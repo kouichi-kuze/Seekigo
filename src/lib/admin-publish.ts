@@ -6,6 +6,7 @@ import {
 } from './admin-security'
 import { processAdminDedupeReviewPost } from './admin-dedupe-review'
 import { processAdminImageUsagePost } from './admin-image-usage'
+import { processAdminGeneratedImagePost } from './admin-generated-image'
 import { processAdminFieldReviewPost } from './admin-field-review'
 import { processAdminEventEditPost } from './admin-event-edit'
 import { processAdminHidePost } from './admin-hide'
@@ -37,6 +38,18 @@ export async function processAdminPublishPost(opts: {
   const { request, url, cookies } = opts
   const form = await readAdminPostForm(request)
   const intent = String(form.get('intent') ?? '')
+
+  // 画像生成は公開・反応要約の source_count チェックより前に完結させる。
+  if (
+    intent === 'generated_image_create' ||
+    intent === 'generated_image_regenerate' ||
+    intent === 'generated_image_custom' ||
+    intent === 'generated_image_upload' ||
+    intent === 'generated_image_approve' ||
+    intent === 'generated_image_reject'
+  ) {
+    return processAdminGeneratedImagePost({ request, url, cookies, form })
+  }
 
   if (
     intent === 'dedupe_link' ||

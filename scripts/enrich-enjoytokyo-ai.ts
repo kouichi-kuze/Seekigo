@@ -6,8 +6,8 @@
  * - events.status = draft
  * - slug が enjoytokyo-*（新規作成分。exact attach の published は対象外）
  *
- * AI 更新フィールドのみ: area / is_free / is_indoor / is_kids / is_night / category / summary
- * area / is_free は deterministic 判定を優先し、AI は判定不能時のみ fallback。
+ * AI 更新フィールドのみ: area / price_type / is_indoor / is_kids / is_night / category / summary
+ * area / price_type は決定的判定を優先し、判定不能時のみ AI。
  * 事実フィールド（日時・会場・住所・料金原文・URL・画像）は絶対に変更しない。
  *
  * DRY_RUN=true（デフォルト）: AI 結果を表示するだけ
@@ -25,8 +25,11 @@ import {
   type AiEnrichment,
 } from './lib/ai-enrichment'
 import {
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
+  normalizePriceType,
+  inferIsNight,
   resolveAreaSlug,
+  resolveIsNight,
 } from '../src/lib/event-field-rules'
 
 config()
@@ -54,7 +57,6 @@ type DbEvent = {
   source_url: string | null
   image_url: string | null
   area: string | null
-  is_free: boolean | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -141,7 +143,7 @@ async function fetchTargetDrafts(supabase: SupabaseClient): Promise<DbEvent[]> {
   const { data: events, error: evErr } = await supabase
     .from('events')
     .select(
-      'id, slug, title, status, start_date, end_date, start_time, end_time, venue, address, price_text, official_url, source_url, image_url, area, is_free, is_indoor, is_kids, is_night, category, summary',
+      'id, slug, title, status, start_date, end_date, start_time, end_time, venue, address, price_text, official_url, source_url, image_url, area, is_indoor, is_kids, is_night, category, summary',
     )
     .in('id', eventIds)
     .eq('status', 'draft')
@@ -161,7 +163,7 @@ function logResult(
   event: DbEvent,
   ai: AiEnrichment | null,
   aiError: string | null,
-  resolved?: { area: string | null; is_free: boolean | null; ruleArea: string | null; ruleIsFree: boolean | null },
+  resolved?: { area: string | null; priceType: string | null; ruleArea: string | null },
 ) {
   console.log(`[enrich-enjoytokyo-ai] ---- ${index}/${total} ----`)
   console.log(`[enrich-enjoytokyo-ai] title: ${event.title}`)
@@ -174,11 +176,11 @@ function logResult(
       `[enrich-enjoytokyo-ai] area: ${resolved.area} (rule=${resolved.ruleArea} ai=${ai?.area.value ?? null})`,
     )
     console.log(
-      `[enrich-enjoytokyo-ai] is_free: ${resolved.is_free} (rule=${resolved.ruleIsFree} ai=${ai?.is_free.value ?? null})`,
+      `[enrich-enjoytokyo-ai] price_type: ${resolved.priceType} (ai=${ai?.price_type.value ?? null})`,
     )
   } else {
     console.log(`[enrich-enjoytokyo-ai] area: ${ai?.area.value ?? null}`)
-    console.log(`[enrich-enjoytokyo-ai] is_free: ${ai?.is_free.value ?? null}`)
+    console.log(`[enrich-enjoytokyo-ai] price_type: ${ai?.price_type.value ?? null}`)
   }
   console.log(`[enrich-enjoytokyo-ai] is_indoor: ${ai?.is_indoor.value ?? null}`)
   console.log(`[enrich-enjoytokyo-ai] is_kids: ${ai?.is_kids.value ?? null}`)
@@ -285,12 +287,13 @@ async function main() {
         address: event.address,
         venue: event.venue,
       })
-      const ruleIsFree = inferIsFreeFromPriceText(event.price_text)
+      const priceType =
+        inferPriceTypeFromPriceText(event.price_text) ??
+        normalizePriceType(ai.price_type.value)
       const resolved = {
         ruleArea,
-        ruleIsFree,
+        priceType,
         area: ruleArea ?? ai.area.value ?? event.area ?? null,
-        is_free: ruleIsFree ?? ai.is_free.value ?? null,
       }
 
       logResult(i + 1, targets.length, event, ai, null, resolved)
@@ -302,10 +305,19 @@ async function main() {
       const { data, error } = await supabase
         .from('events')
         .update({
-          is_free: resolved.is_free,
+          ...(priceType ? { price_type: priceType } : {}),
           is_indoor: ai.is_indoor.value,
           is_kids: ai.is_kids.value,
-          is_night: ai.is_night.value,
+          is_night: resolveIsNight(
+            inferIsNight({
+              title: event.title,
+              summary: ai.summary,
+              venue: event.venue,
+              startTime: event.start_time,
+              endTime: event.end_time,
+            }),
+            ai.is_night.value,
+          ),
           category: ai.category,
           summary: ai.summary || null,
           updated_at: new Date().toISOString(),
@@ -326,7 +338,7 @@ async function main() {
 
       updated += 1
       console.log(
-        `[enrich-enjoytokyo-ai] updated ok: ${event.slug} area=${resolved.area} is_free=${resolved.is_free}`,
+        `[enrich-enjoytokyo-ai] updated ok: ${event.slug} area=${resolved.area} price_type=${resolved.priceType}`,
       )
     } catch (error) {
       failed += 1

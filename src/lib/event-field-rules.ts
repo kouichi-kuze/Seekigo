@@ -2,10 +2,12 @@
  * イベント事実フィールドの deterministic 正規化。
  * - area: 日本語/住所から slug を決定（AI より優先）
  * - address: 明確なアクセス情報のみ除去
- * - is_free: price_text から判定（AI より優先）
+ * - price_type: price_text から free / partially_paid / paid / varies を判定
  *
  * DB schema は変更しない。published 本体の上書きは呼び出し側で禁止すること。
  */
+
+import type { PriceType } from './event-visit-attrs'
 
 /** 内部 area slug → 日本語表示名（一覧・詳細共通） */
 export const AREA_LABELS: Record<string, string> = {
@@ -201,80 +203,118 @@ export function cleanAddressAccess(
   return cleaned
 }
 
+const WHOLE_EVENT_FREE_PART =
+  /^(?:(?:入場|観覧|参加)(?:料(?:金)?)?(?:は|が)?)?無料[。．]?$/
+
+function priceCompact(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, '')
+}
+
+/** 文全体が入場・観覧・参加の無料だけで、金額も条件もない。 */
+function isWholeEventFreeText(compact: string): boolean {
+  const body = compact.replace(/^料金[:：]/, '')
+  const parts = body
+    .split(/[。．]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return false
+  return parts.every((part) => WHOLE_EVENT_FREE_PART.test(part))
+}
+
+const VARIES_PRICE_RE =
+  /(?:各種イベント|提供店|プログラム|イベント|店舗|お店|内容)によって(?:料金が)?(?:異なります|異なる)/
+
+const FREE_BASE_RE =
+  /(?:入場料金?(?:は|が|:)?無料|入場無料|観覧料(?:は|が)?無料|観覧無料|観覧は無料|参加費は不要|参加費不要|無料で鑑賞|無料で観覧)/
+
+function hasPriceYen(compact: string): boolean {
+  return /\d[\d,]*円/.test(compact)
+}
+
 /**
- * price_text から is_free を deterministic 判定。
- * Seekigo: 入場・参加自体が無料なら一部有料でも true。
- * 判定不能は null（AI fallback 可）。
+ * price_text から料金区分を決める。判断できなければ null。
+ * 年齢などの一部無料は、主要な一般料金が有料なら paid。
  */
-export function inferIsFreeFromPriceText(
+export function inferPriceTypeFromPriceText(
   priceText: string | null | undefined,
-): boolean | null {
+): PriceType | null {
   if (priceText == null) return null
   const raw = priceText.normalize('NFKC').trim()
   if (!raw) return null
+  const compact = priceCompact(raw)
 
-  const compact = raw.replace(/\s+/g, '')
+  if (VARIES_PRICE_RE.test(compact)) return 'varies'
+  if (/一部有料/.test(compact)) return 'partially_paid'
 
-  // 明確な無料入場・参加（一部有料注記があっても true）
-  if (
-    /入場無料/.test(compact) ||
-    /参加無料/.test(compact) ||
-    /観覧無料/.test(compact) ||
-    /入場料[金]?(?:は)?無料/.test(compact) ||
-    /入場料[金]?[：:＝=]無料/.test(compact)
-  ) {
-    return true
-  }
+  const freeBase = FREE_BASE_RE.test(compact)
+  const paidPart = /有料/.test(compact) || hasPriceYen(compact) || /別途/.test(compact)
+  if (freeBase && paidPart) return 'partially_paid'
+  if (freeBase || isWholeEventFreeText(compact)) return 'free'
 
-  // 単独の「無料」または注記付き「無料※…」「無料（…）」
-  if (
-    /^無料$/.test(compact) ||
-    /^無料[※*（(・]/.test(compact) ||
-    /^無料[。．.]/.test(compact)
-  ) {
-    return true
-  }
-
-  // 文中の無料だが「無料ではない」等を除外
-  if (/無料/.test(compact)) {
-    if (/無料ではな|無料じゃな|有料のみ|すべて有料|全て有料/.test(compact)) {
-      return false
-    }
-    // 「〜は無料」など入場無料相当
-    if (/(?:は|が|で)無料|無料です|無料となります|無料で/.test(compact)) {
-      return true
-    }
-    // その他「無料」を含むが曖昧な場合も、Seekigo 方針では入場無料寄り
-    // 「有料・無料」混在で入場が不明なら null に近づける
-    if (/有料/.test(compact) && !/(?:入場|参加|観覧).*無料|無料.*(?:入場|参加|観覧)/.test(compact)) {
-      // 「一部有料」のみ併記の無料は上で true。ここは「有料と無料が並ぶ曖昧」
-      if (/一部有料|一部.*?有料|有料コンテンツ|有料エリア/.test(compact)) {
-        return true
-      }
-      return null
-    }
-    return true
-  }
-
-  // 明確な有料
-  if (/^有料$/.test(compact) || /(?:^|[。．])有料(?:[。．]|対応|$)/.test(compact)) {
-    return false
-  }
-  if (
-    /(?:一般|入場料|前売|前売り|当日|大人|高校生|大学生|中学生)[^無料]{0,12}\d{2,6}\s*円/.test(
-      raw,
-    )
-  ) {
-    return false
-  }
-  if (/\d{2,6}\s*円/.test(raw) && !/無料/.test(compact)) {
-    return false
-  }
-  if (/有料/.test(compact) && !/無料/.test(compact)) {
-    return false
-  }
-
+  if (/無料ではな|無料じゃな/.test(compact)) return 'paid'
+  if (hasPriceYen(compact) && /内容により異/.test(compact)) return null
+  if (isAncillaryFeeOnly(compact)) return null
+  if (hasPriceYen(compact) || /有料/.test(compact)) return 'paid'
   return null
+}
+
+/** 主体験の入場・参加ではなく、飲食ブースや任意の特別席だけが有料。 */
+function isAncillaryFeeOnly(compact: string): boolean {
+  if (/(?:一般|入場料|入場券|チケット|参加費)\d/.test(compact)) return false
+  if (/サポーターズシート/.test(compact)) return true
+  return /(?:屋台|飲食|キッチンカー|テント).{0,16}有料/.test(compact)
+}
+
+export function normalizePriceType(value: unknown): PriceType | null {
+  if (value === 'free' || value === 'partially_paid' || value === 'paid' || value === 'varies') {
+    return value
+  }
+  return null
+}
+
+function clockMinutes(value: string | null | undefined): number | null {
+  const match = value?.trim().match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null
+  if (!Number.isFinite(minute) || minute < 0 || minute > 59) return null
+  return hour * 60 + minute
+}
+
+/**
+ * 「夜どこ行く？」の候補か。遅くまで開いているだけでは true にしない。
+ * 判断できないときは null。
+ */
+export function inferIsNight(input: {
+  title?: string | null
+  summary?: string | null
+  venue?: string | null
+  description?: string | null
+  startTime?: string | null
+  endTime?: string | null
+}): boolean | null {
+  const raw = [input.title, input.summary, input.venue, input.description]
+    .filter((part) => part?.trim())
+    .join('\n')
+    .normalize('NFKC')
+  const text = raw.replace(/グッドナイト/g, '').replace(/暗闇/g, '')
+  if (/夜市|宵|夜間|夜祭|ナイト|ビアガーデン|盆踊|オクトーバーフェスト/.test(text)) {
+    return true
+  }
+  const start = clockMinutes(input.startTime)
+  if (start != null && start >= 17 * 60) return true
+  return null
+}
+
+/** 規則で夜向けなら true。AI が遅くまで開いているだけで true にしたときは null。 */
+export function resolveIsNight(
+  inferred: boolean | null,
+  aiValue: boolean | null | undefined,
+): boolean | null {
+  if (inferred === true) return true
+  if (aiValue === true) return null
+  return aiValue ?? null
 }
 
 /**
@@ -293,23 +333,28 @@ export const NEIGHBORHOOD_TO_MUNICIPALITY: Record<string, string> = {
 /** 区・市として municipality に入れてよいスラッグ。街スラッグは含めない。 */
 export const MUNICIPALITY_SLUGS = [
   'arakawa',
+  'bunkyo',
+  'chiyoda',
   'chuo',
   'higashiyamato',
+  'kita',
+  'koganei',
+  'koto',
   'machida',
   'meguro',
   'minato',
+  'nerima',
+  'ota',
+  'setagaya',
   'shibuya',
+  'shinagawa',
   'shinjuku',
+  'suginami',
   'sumida',
+  'tachikawa',
   'taito',
   'tama',
   'yokohama',
-  'koto',
-  'setagaya',
-  'ota',
-  'suginami',
-  'shinagawa',
-  'nerima',
 ] as const
 
 /** 今回の自動バックフィルから外す area。 */
@@ -321,15 +366,35 @@ export const MUNICIPALITY_REVIEW_AREA_SLUGS = [
 ] as const
 
 const MUNICIPALITY_SLUG_SET = new Set<string>(MUNICIPALITY_SLUGS)
+
+/** 区・市スラッグ。area の修正候補にはしない。 */
+export function isMunicipalitySlug(slug: string | null | undefined): boolean {
+  const key = slug?.trim().toLowerCase()
+  return Boolean(key && MUNICIPALITY_SLUG_SET.has(key))
+}
+
+/** 街の area 候補。自治体スラッグは null。 */
+export function neighborhoodAreaCandidate(
+  slug: string | null | undefined,
+): string | null {
+  const key = slug?.trim().toLowerCase() || null
+  if (!key || isMunicipalitySlug(key)) return null
+  return key
+}
 const REVIEW_AREA_SET = new Set<string>(MUNICIPALITY_REVIEW_AREA_SLUGS)
 
-/** 住所に明示された区市町村だけ。タイトルや会場名では判定しない。 */
+/**
+ * 文中に明示された区市町村だけ。
+ * 「多摩」だけでは多摩市にしない。「港北区」は北区にしない。
+ */
 const ADDRESS_MUNICIPALITY_PATTERNS: Array<{ re: RegExp; slug: string }> = [
   { re: /東大和市/, slug: 'higashiyamato' },
   { re: /横浜市/, slug: 'yokohama' },
+  { re: /小金井市/, slug: 'koganei' },
+  { re: /立川市/, slug: 'tachikawa' },
   { re: /町田市/, slug: 'machida' },
   { re: /多摩市/, slug: 'tama' },
-  { re: /江東区/, slug: 'koto' },
+  { re: /千代田区/, slug: 'chiyoda' },
   { re: /世田谷区/, slug: 'setagaya' },
   { re: /杉並区/, slug: 'suginami' },
   { re: /品川区/, slug: 'shinagawa' },
@@ -338,41 +403,70 @@ const ADDRESS_MUNICIPALITY_PATTERNS: Array<{ re: RegExp; slug: string }> = [
   { re: /渋谷区/, slug: 'shibuya' },
   { re: /新宿区/, slug: 'shinjuku' },
   { re: /中央区/, slug: 'chuo' },
+  { re: /文京区/, slug: 'bunkyo' },
   { re: /台東区/, slug: 'taito' },
   { re: /墨田区/, slug: 'sumida' },
   { re: /目黒区/, slug: 'meguro' },
   { re: /荒川区/, slug: 'arakawa' },
+  { re: /(?<!港)北区/, slug: 'kita' },
   { re: /港区/, slug: 'minato' },
 ]
 
-function municipalityFromAddress(address: string | null | undefined): string | null {
-  const text = normalizeLookupText(address)
-  if (!text) return null
+function explicitMunicipalitySlugs(
+  value: string | null | undefined,
+): Set<string> {
+  const text = normalizeLookupText(value)
   const found = new Set<string>()
+  if (!text) return found
   for (const { re, slug } of ADDRESS_MUNICIPALITY_PATTERNS) {
     if (re.test(text)) found.add(slug)
   }
-  if (found.size !== 1) return null
+  return found
+}
+
+/** 明示が一つならその自治体。複数あるときは null。明示がなければ undefined。 */
+function uniqueExplicitMunicipality(
+  value: string | null | undefined,
+): string | null | undefined {
+  const found = explicitMunicipalitySlugs(value)
+  if (found.size === 0) return undefined
+  if (found.size > 1) return null
   return [...found][0]
 }
 
 /**
+ * area スラッグから自治体を返す。
+ * 住所・会場に別の自治体が書いてあるときは呼ばない。
+ * tama は「多摩市」の明記がないと自治体にしない。
+ */
+function municipalityFromAreaSlug(area: string | null | undefined): string | null {
+  const key = area?.trim().toLowerCase() || null
+  if (!key) return null
+  if (key === 'tama') return null
+  const fromNeighborhood = NEIGHBORHOOD_TO_MUNICIPALITY[key]
+  if (fromNeighborhood) return fromNeighborhood
+  if (REVIEW_AREA_SET.has(key)) return null
+  if (MUNICIPALITY_SLUG_SET.has(key)) return key
+  return null
+}
+
+/**
  * municipality だけ返す。area 列は変更しない。
- * 要確認の街、未知スラッグ、住所から自治体が一つに決まらない場合は null。
+ * 優先順: 住所の自治体 → 会場文に書かれた自治体 → area 対応。
+ * 要確認の街、未知スラッグ、自治体が一つに決まらない場合は null。
  */
 export function inferMunicipalitySlug(input: {
   area?: string | null
   address?: string | null
+  venue?: string | null
 }): string | null {
-  const area = input.area?.trim().toLowerCase() || null
-  if (area) {
-    const fromNeighborhood = NEIGHBORHOOD_TO_MUNICIPALITY[area]
-    if (fromNeighborhood) return fromNeighborhood
-    if (REVIEW_AREA_SET.has(area)) return null
-    if (MUNICIPALITY_SLUG_SET.has(area)) return area
-    return null
-  }
-  return municipalityFromAddress(input.address)
+  const fromAddress = uniqueExplicitMunicipality(input.address)
+  if (fromAddress !== undefined) return fromAddress
+
+  const fromVenue = uniqueExplicitMunicipality(input.venue)
+  if (fromVenue !== undefined) return fromVenue
+
+  return municipalityFromAreaSlug(input.area)
 }
 
 export type EventPlace = {
@@ -383,9 +477,25 @@ export type EventPlace = {
   legacyArea: string | null
 }
 
+function neighborhoodSlug(
+  slug: string | null | undefined,
+): string | null {
+  const key = slug?.trim().toLowerCase() || null
+  if (!key || !NEIGHBORHOOD_TO_MUNICIPALITY[key]) return null
+  return key
+}
+
+function reviewAreaSlug(slug: string | null | undefined): string | null {
+  const key = slug?.trim().toLowerCase() || null
+  if (!key || !REVIEW_AREA_SET.has(key)) return null
+  return key
+}
+
 /**
  * 新規イベント用。municipality と街 area を分ける。
- * 会場・住所で街が分かるときはそれを優先し、区だけのときは area を空にする。
+ * 優先順は住所の自治体、会場文の自治体、area 対応。
+ * 住所の自治体と area 対応が食い違うときは area を空にする。
+ * 区だけのときは area を空にする。
  */
 export function resolveEventPlace(input: ResolveAreaInput): EventPlace {
   const legacyArea = resolveAreaSlug(input)
@@ -394,33 +504,25 @@ export function resolveEventPlace(input: ResolveAreaInput): EventPlace {
     venue: input.venue,
   })
   const neighborhood =
-    (fromVenue && NEIGHBORHOOD_TO_MUNICIPALITY[fromVenue] ? fromVenue : null) ??
-    (legacyArea && NEIGHBORHOOD_TO_MUNICIPALITY[legacyArea] ? legacyArea : null)
+    neighborhoodSlug(fromVenue) ?? neighborhoodSlug(legacyArea)
+  const reviewArea = reviewAreaSlug(fromVenue) ?? reviewAreaSlug(legacyArea)
+  const municipality = inferMunicipalitySlug({
+    area: neighborhood ?? legacyArea ?? fromVenue,
+    address: input.address,
+    venue: input.venue,
+  })
 
   if (neighborhood) {
-    return {
-      municipality: NEIGHBORHOOD_TO_MUNICIPALITY[neighborhood],
-      area: neighborhood,
-      legacyArea,
+    const parent = NEIGHBORHOOD_TO_MUNICIPALITY[neighborhood]
+    if (municipality === parent) {
+      return { municipality, area: neighborhood, legacyArea }
     }
-  }
-
-  if (legacyArea && MUNICIPALITY_SLUG_SET.has(legacyArea)) {
-    return { municipality: legacyArea, area: null, legacyArea }
-  }
-  if (fromVenue && MUNICIPALITY_SLUG_SET.has(fromVenue)) {
-    return { municipality: fromVenue, area: null, legacyArea }
-  }
-  if (legacyArea && REVIEW_AREA_SET.has(legacyArea)) {
-    return { municipality: null, area: legacyArea, legacyArea }
-  }
-  if (fromVenue && REVIEW_AREA_SET.has(fromVenue)) {
-    return { municipality: null, area: fromVenue, legacyArea }
+    return { municipality, area: null, legacyArea }
   }
 
   return {
-    municipality: inferMunicipalitySlug({ area: null, address: input.address }),
-    area: null,
+    municipality,
+    area: reviewArea,
     legacyArea,
   }
 }

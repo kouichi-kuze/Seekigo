@@ -20,7 +20,10 @@ import {
   type DuplicateStatus,
 } from '../src/lib/event-dedupe'
 import { isBodyProtectedFromSync } from '../src/lib/event-status'
-import { resolveEventPlace } from '../src/lib/event-field-rules'
+import {
+  inferPriceTypeFromPriceText,
+  resolveEventPlace,
+} from '../src/lib/event-field-rules'
 import { syncFieldReviewsForPublishedEvent } from './lib/field-reviews'
 import type {
   MinatoAreaStatus,
@@ -520,6 +523,7 @@ async function main() {
                 venue: event.venue_name,
                 official_url: event.official_url,
                 price_text: event.price_text,
+                price_type: inferPriceTypeFromPriceText(event.price_text),
               },
               write: true,
             })
@@ -637,6 +641,7 @@ async function main() {
         start_time: null,
         end_time: null,
         price_text: event.price_text,
+        price_type: inferPriceTypeFromPriceText(event.price_text),
         summary: event.description_raw,
         category: [],
         image_usage_status: 'unknown',

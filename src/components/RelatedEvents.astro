@@ -1,0 +1,62 @@
+---
+import EventCard from './EventCard.astro'
+import type { Event } from '../lib/events'
+import type { SiteLocale } from '../lib/i18n/locale'
+
+interface Props {
+  heading: string
+  events: Event[]
+  locale?: SiteLocale
+}
+
+const { heading, events, locale = 'ja' } = Astro.props
+---
+
+{
+  events.length > 0 && (
+    <section class="event-related" aria-labelledby="related-heading">
+      <h2 id="related-heading" class="event-related__heading">
+        {heading}
+      </h2>
+      <div class="event-related__grid">
+        {events.map((event) => (
+          <EventCard event={event} locale={locale} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+<style>
+  .event-related {
+    box-sizing: border-box;
+    width: 100vw;
+    max-width: 100vw;
+    margin-left: calc(50% - 50vw);
+    padding-inline: max(1rem, calc((100vw - 1200px) / 2));
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .event-related__heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--c-text);
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--c-primary);
+    align-self: flex-start;
+  }
+
+  .event-related__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 20px;
+  }
+
+  @media (min-width: 1120px) {
+    .event-related__grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+</style>

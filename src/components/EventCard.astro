@@ -1,8 +1,21 @@
 ---
 import { resolveEventDisplayImage } from '../lib/event-image-usage'
-import { isEventEnded } from '../lib/display'
+import { formatEventPlaceLine } from '../lib/display'
+import {
+  formatCardScheduleDates,
+  resolveScheduleStatus,
+  type DateSpan,
+} from '../lib/event-schedule'
+import { getLocalizedEventPath, type SiteLocale } from '../lib/i18n/locale'
+import { EVENT_UI_EN, formatPriceEn } from '../lib/i18n/event-en'
+import {
+  formatCardPriceChip,
+  formatCardPriceLine,
+  isListedAsFreePrice,
+} from '../lib/event-visit-display'
 
 interface Props {
+  locale?: SiteLocale
   event: {
     id?: string | number
     slug?: string | null
@@ -14,41 +27,81 @@ interface Props {
     end_date?: string | null
     venue?: string | null
     area?: string | null
+    municipality?: string | null
     price_text?: string | null
+    price_min?: number | null
+    price_max?: number | null
+    price_type?: string | null
     summary?: string | null
     category?: string | string[] | null
-    is_free?: boolean
     is_kids?: boolean
     is_indoor?: boolean
     is_night?: boolean
     official_url?: string | null
+    schedule_spans?: DateSpan[]
   }
 }
 
-const { event } = Astro.props
+const { event, locale = 'ja' } = Astro.props
 
-const hasAnyTag = event.is_free || event.is_kids || event.is_indoor || event.is_night
+const priceChip = formatCardPriceChip(event.price_type, locale)
+const cardPrice =
+  locale === 'en' ? formatPriceEn(event) : formatCardPriceLine(event)
 
-const dateLabel = (() => {
-  if (!event.start_date) return null
-  if (event.end_date && event.end_date !== event.start_date) {
-    return `${event.start_date} ～ ${event.end_date}`
-  }
-  return event.start_date
-})()
+const hasAnyTag = Boolean(priceChip || event.is_kids || event.is_indoor || event.is_night)
+
+const scheduleSpans = event.schedule_spans ?? []
+const dateLabel = formatCardScheduleDates(
+  scheduleSpans,
+  {
+    start_date: scheduleSpans.length ? null : event.start_date,
+    end_date: scheduleSpans.length ? null : event.end_date,
+  },
+  locale,
+)
+const placeLabel = formatEventPlaceLine(event.municipality, event.area, {
+  omitRawSlug: true,
+})
 
 const displayImage = resolveEventDisplayImage(event)
 const isFallbackImage = displayImage.kind !== 'external'
+const scheduleStatus = resolveScheduleStatus(scheduleSpans, {
+  start_date: scheduleSpans.length ? null : event.start_date,
+  end_date: scheduleSpans.length ? null : event.end_date,
+})
+const isEnded = scheduleStatus === 'ended'
+const statusLabel =
+  scheduleStatus === 'today'
+    ? locale === 'en'
+      ? EVENT_UI_EN.happeningToday
+      : '本日開催'
+    : scheduleStatus === 'upcoming'
+      ? locale === 'en'
+        ? EVENT_UI_EN.upcoming
+        : '開催予定'
+      : scheduleStatus === 'ended'
+        ? locale === 'en'
+          ? EVENT_UI_EN.ended
+          : '開催終了'
+        : null
+const conceptLabel =
+  displayImage.kind === 'generated'
+    ? locale === 'en'
+      ? EVENT_UI_EN.illustrativeImage
+      : 'イメージ'
+    : null
 
-const detailUrl = event.slug ? `/tokyo/event/${event.slug}/` : null
-const isEnded = isEventEnded(event.start_date, event.end_date)
+const detailUrl = event.slug
+  ? getLocalizedEventPath(String(event.slug), locale)
+  : null
 ---
 
 <article
   class:list={['event-card', detailUrl && 'event-card--linked']}
   data-start={event.start_date ?? ''}
   data-end={event.end_date ?? ''}
-  data-free={event.is_free ? 'true' : 'false'}
+  data-spans={scheduleSpans.map((span) => `${span.start}/${span.end}`).join(',')}
+  data-free={isListedAsFreePrice(event.price_type) ? 'true' : 'false'}
   data-kids={event.is_kids ? 'true' : 'false'}
   data-indoor={event.is_indoor ? 'true' : 'false'}
   data-night={event.is_night ? 'true' : 'false'}
@@ -66,26 +119,13 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
       ]}
     />
 
-    {isEnded && (
-      <div class="card-image__ended" aria-hidden="true">
-        <span class="card-image__ended-label">開催終了</span>
-      </div>
-    )}
-
-    {hasAnyTag && (
-      <div class="card-tags">
-        {event.is_free   && <span class="tag">無料</span>}
-        {event.is_kids   && <span class="tag">子ども向け</span>}
-        {event.is_indoor && <span class="tag">屋内</span>}
-        {event.is_night  && <span class="tag">夜</span>}
-      </div>
+    {conceptLabel && (
+      <span class="card-image__concept">{conceptLabel}</span>
     )}
   </div>
 
   <!-- Body -->
   <div class="card-body">
-    {event.area && <p class="card-area">{event.area}</p>}
-
     <h2 class="card-title">
       {detailUrl ? (
         <a href={detailUrl} class="card-title__link card-title__link--stretch">
@@ -96,18 +136,20 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
       )}
     </h2>
 
+    {(statusLabel || dateLabel) && (
+      <p class="card-when">
+        {statusLabel && (
+          <span class:list={['card-status', scheduleStatus && `card-status--${scheduleStatus}`]}>
+            {statusLabel}
+          </span>
+        )}
+        {dateLabel && <span class="card-when__date">{dateLabel}</span>}
+      </p>
+    )}
+
+    {placeLabel && <p class="card-area">{placeLabel}</p>}
+
     <dl class="card-meta">
-      {dateLabel && (
-        <>
-          <dt class="sr-only">開催日</dt>
-          <dd class="card-meta__item">
-            <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
-            </svg>
-            {dateLabel}
-          </dd>
-        </>
-      )}
       {event.venue && (
         <>
           <dt class="sr-only">会場</dt>
@@ -119,18 +161,27 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
           </dd>
         </>
       )}
-      {event.price_text && (
+      {cardPrice && (
         <>
           <dt class="sr-only">料金</dt>
-          <dd class="card-meta__item">
+          <dd class="card-meta__item card-meta__price">
             <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd" />
             </svg>
-            {event.price_text}
+            <span class="card-price-text">{cardPrice}</span>
           </dd>
         </>
       )}
     </dl>
+
+    {hasAnyTag && (
+      <ul class="card-attrs">
+        {priceChip && <li class="tag">{priceChip}</li>}
+        {event.is_kids && <li class="tag">{locale === 'en' ? EVENT_UI_EN.forKids : '子ども向け'}</li>}
+        {event.is_indoor && <li class="tag">{locale === 'en' ? EVENT_UI_EN.indoor : '屋内'}</li>}
+        {event.is_night && <li class="tag">{locale === 'en' ? EVENT_UI_EN.night : '夜'}</li>}
+      </ul>
+    )}
 
     {event.summary && (
       <p class="card-summary">{event.summary}</p>
@@ -203,32 +254,61 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
     transform: scale(1.03);
   }
 
-  .card-image__ended {
+  .card-image__concept {
     position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(17, 24, 39, 0.42);
-    pointer-events: none;
-  }
-  .card-image__ended-label {
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
+    left: 8px;
+    bottom: 8px;
+    z-index: 1;
+    max-width: calc(100% - 16px);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0.04em;
     color: #fff;
-    padding: 8px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.65);
+    padding: 2px 6px;
     border-radius: var(--r-sm);
-    background: rgba(17, 24, 39, 0.55);
-    backdrop-filter: blur(2px);
+    background: rgba(17, 24, 39, 0.62);
   }
 
-  /* ─── Tags overlay ─── */
-  .card-tags {
-    position: absolute;
-    top: 10px;
-    left: 10px;
+  /* ─── Body ─── */
+  .card-body {
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+  .card-when {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    margin: 0;
+  }
+  .card-status {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--c-muted);
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+  }
+  .card-status--today {
+    color: var(--c-primary);
+    background: color-mix(in srgb, var(--c-primary) 10%, #fff);
+  }
+  .card-when__date {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--c-muted);
+  }
+  .card-attrs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -241,23 +321,12 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
     line-height: 1;
     padding: 4px 8px;
     border-radius: var(--r-sm);
-    letter-spacing: 0.02em;
-  }
-
-  /* ─── Body ─── */
-  .card-body {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    flex: 1;
   }
   .card-area {
     font-size: 11px;
     font-weight: 700;
     color: var(--c-primary);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.04em;
   }
   .card-title {
     font-size: 15px;
@@ -297,6 +366,12 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
     font-size: 12px;
     color: var(--c-muted);
     line-height: 1.4;
+  }
+  .card-price-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .meta-icon {
     width: 14px;
@@ -355,6 +430,16 @@ const isEnded = isEventEnded(event.start_date, event.end_date)
     color: var(--c-primary) !important;
   }
   .card-cta svg { width: 11px; height: 11px; }
+
+  @media (max-width: 480px) {
+    .card-body {
+      gap: 6px;
+      padding: 12px;
+    }
+    .card-title {
+      font-size: 14px;
+    }
+  }
 
   /* ─── Accessibility ─── */
   .sr-only {

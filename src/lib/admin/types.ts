@@ -18,6 +18,7 @@ export type AdminEvent = {
   source_url: string | null
   official_url: string | null
   price_text?: string | null
+  is_night?: boolean | null
   status: string | null
   image_url?: string | null
   image_usage_status?: string | null
@@ -29,7 +30,7 @@ export type AdminEvent = {
 const VISIT_ATTR_SELECT = EVENT_VISIT_ATTR_COLUMNS.join(', ')
 
 export const ADMIN_EVENT_SELECT =
-  `id, title, slug, area, start_date, end_date, start_time, end_time, venue, address, category, summary, source_url, official_url, price_text, status, image_url, image_usage_status, image_source, image_credit, updated_at, ${VISIT_ATTR_SELECT}`
+  `id, title, slug, area, start_date, end_date, start_time, end_time, venue, address, category, summary, source_url, official_url, price_text, is_night, status, image_url, image_usage_status, image_source, image_credit, updated_at, ${VISIT_ATTR_SELECT}`
 
 export const ADMIN_EVENT_SELECT_BASE =
   'id, title, slug, area, start_date, end_date, venue, address, category, summary, source_url, official_url, status'

@@ -75,29 +75,42 @@ export function formatParkingStatusEn(
   return map[status as ParkingStatus] ?? null
 }
 
-/** Structured price only — never falls back to Japanese price_text */
-export function formatPriceEn(event: VisitDisplayEvent): string | null {
-  if (event.is_free === true) return 'Free admission'
-
-  if (event.is_free === false) {
-    const min =
-      typeof event.price_min === 'number' && Number.isFinite(event.price_min)
-        ? event.price_min
-        : null
-    const max =
-      typeof event.price_max === 'number' && Number.isFinite(event.price_max)
-        ? event.price_max
-        : null
-
-    if (min != null && max != null) {
-      if (min === max) return formatYenEn(min)
-      return `${formatYenEn(min)}–${formatYenEn(max)}`
-    }
-    if (min != null) return `From ${formatYenEn(min)}`
-    if (max != null) return `Up to ${formatYenEn(max)}`
-    return 'Paid admission'
+export function formatPriceClassEn(
+  priceType: string | null | undefined,
+): string | null {
+  switch (priceType) {
+    case 'free':
+      return 'Free'
+    case 'partially_paid':
+      return 'Partially paid'
+    case 'paid':
+      return 'Paid'
+    case 'varies':
+      return 'Varies'
+    default:
+      return null
   }
+}
 
+/** 有料かつ数値があるときだけ金額。区分そのものや price_text は返さない。 */
+export function formatPriceEn(event: VisitDisplayEvent): string | null {
+  if (event.price_type !== 'paid') return null
+
+  const min =
+    typeof event.price_min === 'number' && Number.isFinite(event.price_min)
+      ? event.price_min
+      : null
+  const max =
+    typeof event.price_max === 'number' && Number.isFinite(event.price_max)
+      ? event.price_max
+      : null
+
+  if (min != null && max != null) {
+    if (min === max) return formatYenEn(min)
+    return `${formatYenEn(min)}–${formatYenEn(max)}`
+  }
+  if (min != null) return `From ${formatYenEn(min)}`
+  if (max != null) return `Up to ${formatYenEn(max)}`
   return null
 }
 
@@ -210,6 +223,19 @@ export function formatEventTimeRangeEn(
   return start ?? end
 }
 
+/** 開催回の1枠。開始だけなら末尾にダッシュを残す。 */
+export function formatOccurrenceTimeEn(
+  startTime: string | null | undefined,
+  endTime: string | null | undefined,
+): string | null {
+  const start = startTime?.trim() ? formatClockEn(startTime) : null
+  const end = endTime?.trim() ? formatClockEn(endTime) : null
+  if (start && end) return `${start}–${end}`
+  if (start) return `${start}–`
+  if (end) return `–${end}`
+  return null
+}
+
 function resolveVenueLabelEn(event: VisitDisplayEvent): string | null {
   const fromType = formatVenueTypeEn(event.venue_type)
   if (fromType) return fromType
@@ -250,8 +276,9 @@ export function buildVisitChecklistTagsEn(
     tags.push({ id: 'reservation', label: 'No reservation required' })
   }
 
-  if (event.is_free === true) {
-    tags.push({ id: 'free', label: 'Free' })
+  const priceClass = formatPriceClassEn(event.price_type)
+  if (priceClass) {
+    tags.push({ id: 'price', label: priceClass })
   }
 
   const walk = formatWalkTagEn(event.walk_minutes)
@@ -368,8 +395,19 @@ export const EVENT_UI_EN = {
   breadcrumbNav: 'Breadcrumb',
   night: 'Night',
   ended: 'Ended',
+  happeningToday: 'Happening Today',
+  upcoming: 'Upcoming',
+  free: 'Free',
+  partiallyPaid: 'Partially paid',
+  paid: 'Paid',
+  varies: 'Varies',
+  forKids: 'For kids',
+  indoor: 'Indoor',
   reservationLink: 'Open reservation page',
   hoursNote: 'Japan Standard Time (JST)',
   source: 'Source',
   overview: 'Overview',
+  relatedCurrent: 'You may also like',
+  relatedEnded: 'More events to explore',
+  illustrativeImage: 'Illustrative image',
 } as const

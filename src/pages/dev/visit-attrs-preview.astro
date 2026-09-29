@@ -28,14 +28,13 @@ const event42Like: VisitDisplayEvent = {
   family_friendly: 'unknown',
   access_text: '東京テレポート駅から徒歩約5分',
   reservation_status: null,
-  is_free: null,
   price_text: null,
   parking_status: null,
 }
 
 /** 全 visit attrs ありの表示確認用 */
 const fullAttrs: VisitDisplayEvent = {
-  is_free: false,
+  price_type: 'paid',
   price_min: 2000,
   price_max: 3000,
   price_text: '一般 2,000円〜3,000円',

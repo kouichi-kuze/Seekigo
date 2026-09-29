@@ -14,6 +14,10 @@ interface Props {
   robots?: string
   /** 省略時はサイト共通 OGP。絶対 URL またはサイト相対パス */
   ogImage?: string
+  /** イベント画像など、共通 OGP 以外の alt */
+  ogImageAlt?: string
+  /** head に出す application/ld+json。未指定なら出さない */
+  jsonLd?: string
   /** html lang / og:locale（default ja） */
   locale?: SiteLocale
   /** hreflang alternate パス（サイト相対、例: /tokyo/event/x/） */
@@ -35,6 +39,8 @@ const {
   noindex = false,
   robots,
   ogImage,
+  ogImageAlt: ogImageAltProp,
+  jsonLd,
   locale = 'ja',
   hreflangAlternates = [],
   eventLanguageSwitcher,
@@ -60,11 +66,13 @@ function toAbsolutePath(path: string): string | undefined {
 }
 
 const resolvedOgImage = toAbsoluteAsset(ogImage ?? BRAND_ASSETS.ogImage)
+const usingDefaultOgImage = !ogImage
 const robotsContent = robots ?? (noindex ? 'noindex, nofollow' : undefined)
 const htmlLang = locale === 'en' ? 'en' : 'ja'
 const ogLocale = locale === 'en' ? 'en_US' : 'ja_JP'
 const ogImageAlt =
-  locale === 'en' ? 'Seekigo — Find it. Go.' : 'Seekigo — 探して、行く。'
+  ogImageAltProp?.trim() ||
+  (locale === 'en' ? 'Seekigo — Find it. Go.' : 'Seekigo — 探して、行く。')
 const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
 ---
 
@@ -95,13 +103,24 @@ const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
     {description && <meta property="og:description" content={description} />}
     {canonical && <meta property="og:url" content={canonical} />}
     <meta property="og:image" content={resolvedOgImage} />
-    <meta property="og:image:width" content={String(OG_IMAGE_SIZE.width)} />
-    <meta property="og:image:height" content={String(OG_IMAGE_SIZE.height)} />
+    {
+      usingDefaultOgImage && (
+        <>
+          <meta property="og:image:width" content={String(OG_IMAGE_SIZE.width)} />
+          <meta property="og:image:height" content={String(OG_IMAGE_SIZE.height)} />
+        </>
+      )
+    }
     <meta property="og:image:alt" content={ogImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     {description && <meta name="twitter:description" content={description} />}
     <meta name="twitter:image" content={resolvedOgImage} />
+    {
+      jsonLd && (
+        <script type="application/ld+json" is:inline set:html={jsonLd} />
+      )
+    }
     <GoogleAnalytics />
   </head>
   <body>

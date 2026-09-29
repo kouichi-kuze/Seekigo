@@ -4,7 +4,7 @@
  * 1) 正規化済み JSON の事実を写す（address / lat / lng / price_text）
  * 2) area は会場・住所だけを resolveAreaSlug に渡す。
  *    タイトルの自治体名や記念名称では決めない。特定できなければ null。
- *    is_free / is_indoor / is_kids / is_night は本文・料金・会場の明示だけ。
+ *    price_type / is_indoor / is_kids / is_night は本文・料金・会場の明示だけ。
  *    AI の true / false ではこれらを埋めない。
  * 3) category と summary だけ既存 enrichEventWithAi を使う。
  *    summary が入力にない無料・夜間などを足していたら捨てる。
@@ -34,7 +34,9 @@ import {
 import type { MinatoNormalizedEvent } from './lib/minato-opendata'
 import {
   cleanAddressAccess,
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
+  normalizePriceType,
+  inferIsNight,
   resolveAreaSlug,
 } from '../src/lib/event-field-rules'
 
@@ -63,7 +65,7 @@ type DbEvent = {
   official_url: string | null
   source_url: string | null
   area: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -79,7 +81,7 @@ type Facts = {
   longitude: number | null
   price_text: string | null
   area: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -163,7 +165,7 @@ async function fetchTargetDrafts(supabase: SupabaseClient): Promise<DbEvent[]> {
   const { data, error } = await supabase
     .from('events')
     .select(
-      'id, slug, title, status, start_date, end_date, start_time, end_time, venue, address, price_text, official_url, source_url, area, is_free, is_indoor, is_kids, is_night, category, summary, latitude, longitude',
+      'id, slug, title, status, start_date, end_date, start_time, end_time, venue, address, price_text, official_url, source_url, area, price_type, is_indoor, is_kids, is_night, category, summary, latitude, longitude',
     )
     .in('id', eventIds)
     .eq('status', 'draft')
@@ -190,7 +192,7 @@ async function fetchTargetDrafts(supabase: SupabaseClient): Promise<DbEvent[]> {
       official_url: (event.official_url as string | null) ?? null,
       source_url: (event.source_url as string | null) ?? null,
       area: (event.area as string | null) ?? null,
-      is_free: asBool(event.is_free),
+      price_type: normalizePriceType(event.price_type),
       is_indoor: asBool(event.is_indoor),
       is_kids: asBool(event.is_kids),
       is_night: asBool(event.is_night),
@@ -253,20 +255,16 @@ function judgeKids(audience: string): boolean | null {
   return null
 }
 
-/** 時刻がないときは、夜間・ナイトなどの明示があるときだけ true。花火だから夜、にはしない。 */
+/** 夜の外出先だけ true。花火や遅い閉館だけでは付けない。 */
 function judgeNight(event: DbEvent, source: MinatoNormalizedEvent): boolean | null {
-  const blob = [event.title, source.venue_name, source.description_raw, source.target_raw]
-    .map((value) => textOrNull(value))
-    .filter((value): value is string => Boolean(value))
-    .join('\n')
-  if (/夜間|ナイト|夜の|夜開催|夜間開催/.test(blob)) return true
-  return null
-}
-
-function judgeFree(priceText: string | null, body: string | null): boolean | null {
-  const fromPrice = inferIsFreeFromPriceText(priceText)
-  if (fromPrice !== null) return fromPrice
-  return inferIsFreeFromPriceText(body)
+  return inferIsNight({
+    title: event.title,
+    summary: event.summary,
+    venue: source.venue_name ?? event.venue,
+    description: source.description_raw,
+    startTime: event.start_time,
+    endTime: event.end_time,
+  })
 }
 
 function applyFacts(event: DbEvent, source: MinatoNormalizedEvent): Facts {
@@ -274,7 +272,6 @@ function applyFacts(event: DbEvent, source: MinatoNormalizedEvent): Facts {
     cleanAddressAccess(source.address) ?? textOrNull(source.address)
   const priceText = textOrNull(source.price_text) ?? textOrNull(event.price_text)
   const venue = textOrNull(source.venue_name) ?? event.venue
-  const body = textOrNull(source.description_raw)
 
   return {
     address,
@@ -285,7 +282,7 @@ function applyFacts(event: DbEvent, source: MinatoNormalizedEvent): Facts {
       address,
       venue,
     }),
-    is_free: judgeFree(priceText, body),
+    price_type: inferPriceTypeFromPriceText(priceText),
     is_indoor: judgeIndoor(placeText(source, address)),
     is_kids: judgeKids(audienceText(event, source)),
     is_night: judgeNight(event, source),
@@ -356,7 +353,6 @@ function logStages(
     ['longitude', event.longitude, facts?.longitude ?? null, planned?.longitude ?? null],
     ['price_text', event.price_text, facts?.price_text ?? null, planned?.price_text ?? null],
     ['area', event.area, facts?.area ?? null, planned?.area ?? null],
-    ['is_free', event.is_free, facts?.is_free ?? null, planned?.is_free ?? null],
     ['is_indoor', event.is_indoor, facts?.is_indoor ?? null, planned?.is_indoor ?? null],
     ['is_kids', event.is_kids, facts?.is_kids ?? null, planned?.is_kids ?? null],
     ['is_night', event.is_night, facts?.is_night ?? null, planned?.is_night ?? null],
@@ -388,7 +384,7 @@ function plannedFromStored(event: DbEvent): Planned {
     longitude: event.longitude,
     price_text: event.price_text,
     area: event.area,
-    is_free: event.is_free,
+    price_type: event.price_type,
     is_indoor: event.is_indoor,
     is_kids: event.is_kids,
     is_night: event.is_night,
@@ -404,7 +400,7 @@ function wouldChange(event: DbEvent, planned: Planned): boolean {
     (event.longitude ?? null) !== (planned.longitude ?? null) ||
     (event.price_text ?? null) !== (planned.price_text ?? null) ||
     (event.area ?? null) !== (planned.area ?? null) ||
-    (event.is_free ?? null) !== (planned.is_free ?? null) ||
+    (planned.price_type != null && (event.price_type ?? null) !== planned.price_type) ||
     (event.is_indoor ?? null) !== (planned.is_indoor ?? null) ||
     (event.is_kids ?? null) !== (planned.is_kids ?? null) ||
     (event.is_night ?? null) !== (planned.is_night ?? null) ||
@@ -458,7 +454,6 @@ async function main() {
   const lngFill = { n: 0 }
   let errors = 0
   const flags = {
-    is_free: { true: 0, false: 0, null: 0 },
     is_indoor: { true: 0, false: 0, null: 0 },
     is_kids: { true: 0, false: 0, null: 0 },
     is_night: { true: 0, false: 0, null: 0 },
@@ -520,8 +515,11 @@ async function main() {
 
     const currentCategory = event.category ?? []
     const currentSummary = textOrNull(event.summary)
+    const priceType =
+      facts.price_type ?? normalizePriceType(ai.price_type.value)
     const planned: Planned = {
       ...facts,
+      price_type: priceType,
       area: event.area,
       category: currentCategory.length > 0 ? currentCategory : ai.category,
       summary: currentSummary ?? groundedSummary(ai.summary, event, source),
@@ -532,7 +530,6 @@ async function main() {
     if (!textOrNull(event.address) && planned.address) addressFill.n += 1
     if (event.latitude == null && planned.latitude != null) latFill.n += 1
     if (event.longitude == null && planned.longitude != null) lngFill.n += 1
-    tallyFlag(flags.is_free, planned.is_free)
     tallyFlag(flags.is_indoor, planned.is_indoor)
     tallyFlag(flags.is_kids, planned.is_kids)
     tallyFlag(flags.is_night, planned.is_night)
@@ -542,7 +539,7 @@ async function main() {
 
     logStages(i + 1, targets.length, event, facts, planned, null)
     console.log(
-      `${LOG} ai_raw area=${fmt(ai.area.value)} is_free=${fmt(ai.is_free.value)} is_indoor=${fmt(ai.is_indoor.value)} is_kids=${fmt(ai.is_kids.value)} is_night=${fmt(ai.is_night.value)}`,
+      `${LOG} ai_raw area=${fmt(ai.area.value)} price_type=${fmt(ai.price_type.value)} is_indoor=${fmt(ai.is_indoor.value)} is_kids=${fmt(ai.is_kids.value)} is_night=${fmt(ai.is_night.value)}`,
     )
 
     if (DRY_RUN || !changes) continue
@@ -554,7 +551,7 @@ async function main() {
         latitude: planned.latitude,
         longitude: planned.longitude,
         price_text: planned.price_text,
-        is_free: planned.is_free,
+        ...(planned.price_type ? { price_type: planned.price_type } : {}),
         is_indoor: planned.is_indoor,
         is_kids: planned.is_kids,
         is_night: planned.is_night,
@@ -585,9 +582,6 @@ async function main() {
   console.log(`${LOG} category 補完予定: ${categoryFill.n}`)
   console.log(`${LOG} summary 補完/整形予定: ${summaryShape.n}`)
   console.log(`${LOG} area 改善予定: ${areaImprove.n}`)
-  console.log(
-    `${LOG} is_free true / false / null: ${flags.is_free.true} / ${flags.is_free.false} / ${flags.is_free.null}`,
-  )
   console.log(
     `${LOG} is_indoor true / false / null: ${flags.is_indoor.true} / ${flags.is_indoor.false} / ${flags.is_indoor.null}`,
   )

@@ -7,6 +7,7 @@
  * - candidate_event_id が null でもアプリ側検索で冪等（UNIQUE の NULL 穴埋め）
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { inferPriceTypeFromPriceText } from '../../src/lib/event-field-rules'
 import type { EventSourceName } from '../../src/lib/event-sources'
 import {
   extractEnjoytokyoEventId,
@@ -36,7 +37,7 @@ export type IncomingReviewPayload = {
   source_url: string | null
   source_event_id: string | null
   price_text: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   category: string[] | null
   summary: string | null
   image_url: string | null
@@ -89,7 +90,6 @@ export function buildIncomingPayload(opts: {
   official_url?: string | null
   source_url?: string | null
   price_text?: string | null
-  is_free?: boolean | null
   category?: string[] | null
   summary?: string | null
   image_url?: string | null
@@ -117,7 +117,7 @@ export function buildIncomingPayload(opts: {
     source_url: sourceUrl,
     source_event_id: sourceEventId,
     price_text: opts.price_text ?? null,
-    is_free: typeof opts.is_free === 'boolean' ? opts.is_free : null,
+    price_type: inferPriceTypeFromPriceText(opts.price_text),
     category: Array.isArray(opts.category) ? opts.category : null,
     summary: opts.summary ?? null,
     image_url: opts.image_url ?? null,

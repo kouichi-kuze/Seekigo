@@ -27,7 +27,9 @@ import {
 } from '../src/lib/event-dedupe'
 import {
   cleanAddressAccess,
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
+  inferIsNight,
+  neighborhoodAreaCandidate,
   resolveAreaSlug,
   resolveEventPlace,
 } from '../src/lib/event-field-rules'
@@ -257,7 +259,7 @@ type NewEventRow = {
   start_time: string | null
   end_time: string | null
   price_text: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -309,7 +311,7 @@ function validateNewDraft(
     address,
     venue: detail.venue,
   })
-  const is_free = inferIsFreeFromPriceText(detail.price_text)
+  const price_type = inferPriceTypeFromPriceText(detail.price_text)
   const is_kids = inferKidsFromWalkerplusCategories(rawCategories)
   const now = new Date().toISOString()
 
@@ -338,11 +340,17 @@ function validateNewDraft(
       start_time: normalizeHmToDb(detail.start_time) ?? null,
       end_time: normalizeHmToDb(detail.end_time) ?? null,
       price_text: detail.price_text ?? null,
-      is_free,
+      price_type,
       is_indoor: null,
       is_kids,
-      is_night: null,
+      is_night: inferIsNight({
+        title: detail.title,
+        venue: detail.venue,
+        startTime: detail.start_time,
+        endTime: detail.end_time,
+      }),
       category,
+      // 公開用 summary はここに書かない。下書き整形は scripts/enrich-walkerplus-summary.ts
       summary: null,
       image_url: detail.image_url ?? null,
       image_usage_status: 'unknown',
@@ -487,7 +495,7 @@ async function updateDraftBody(
     updated_at: new Date().toISOString(),
   }
 
-  if (row.is_free !== null) patch.is_free = row.is_free
+  if (row.price_type !== null) patch.price_type = row.price_type
   if (row.is_kids !== null) patch.is_kids = row.is_kids
   if (imageChanged) {
     patch.image_usage_status = 'unknown'
@@ -630,7 +638,6 @@ async function main() {
               official_url: detail.official_url,
               source_url: detail.source_url,
               price_text: detail.price_text ?? null,
-              is_free: inferIsFreeFromPriceText(detail.price_text),
               address: detail.address ?? null,
               category: categoryMapped,
               summary: null,
@@ -679,7 +686,6 @@ async function main() {
               official_url: detail.official_url,
               source_url: detail.source_url,
               price_text: detail.price_text ?? null,
-              is_free: inferIsFreeFromPriceText(detail.price_text),
               address: detail.address ?? null,
               category: categoryMapped,
               summary: null,
@@ -757,7 +763,7 @@ async function main() {
 
         if (isBodyProtectedFromSync(existing.status)) {
           try {
-            const area = resolveImportArea(detail)
+            const area = neighborhoodAreaCandidate(resolveImportArea(detail))
             const frResult = await syncFieldReviewsForPublishedEvent(
               writeClient ?? readClient,
               {
@@ -774,7 +780,7 @@ async function main() {
                   area,
                   address: detail.address ?? null,
                   price_text: detail.price_text ?? null,
-                  is_free: inferIsFreeFromPriceText(detail.price_text),
+                  price_type: inferPriceTypeFromPriceText(detail.price_text),
                   category: categoryMapped,
                   official_url: detail.official_url ?? null,
                 },

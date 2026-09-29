@@ -12,7 +12,7 @@ import type {
 export type VisitConfidence = 'high' | 'medium' | 'low'
 
 export type VisitFieldName =
-  | 'is_free'
+  | 'price_type'
   | 'price_min'
   | 'price_max'
   | 'price_text'
@@ -71,7 +71,7 @@ export type VisitEnrichEventRow = {
   official_url: string | null
   source_url: string | null
   price_text: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   price_min: number | null
   price_max: number | null
   address: string | null

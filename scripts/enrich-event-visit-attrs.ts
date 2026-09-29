@@ -43,7 +43,7 @@ const EVENT_SELECT = [
   'official_url',
   'source_url',
   'price_text',
-  'is_free',
+  'price_type',
   'price_min',
   'price_max',
   'address',
@@ -103,8 +103,13 @@ async function loadEvent(
     official_url: (row.official_url as string | null) ?? null,
     source_url: (row.source_url as string | null) ?? null,
     price_text: (row.price_text as string | null) ?? null,
-    is_free:
-      row.is_free === true || row.is_free === false ? row.is_free : null,
+    price_type:
+      row.price_type === 'free' ||
+      row.price_type === 'partially_paid' ||
+      row.price_type === 'paid' ||
+      row.price_type === 'varies'
+        ? row.price_type
+        : null,
     price_min: (row.price_min as number | null) ?? null,
     price_max: (row.price_max as number | null) ?? null,
     address: (row.address as string | null) ?? null,

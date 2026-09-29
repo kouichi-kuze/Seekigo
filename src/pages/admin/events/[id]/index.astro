@@ -10,7 +10,8 @@ import {
   ADMIN_ENUM_UNSET_LABEL,
   FRIENDLY_VALUE_LABELS,
   IMAGE_USAGE_STATUS_LABELS,
-  IS_FREE_LABELS,
+  IS_NIGHT_LABELS,
+  PRICE_TYPE_LABELS,
   PARKING_STATUS_LABELS,
   RESERVATION_STATUS_LABELS,
   VENUE_TYPE_LABELS,
@@ -20,6 +21,7 @@ import { isBodyProtectedFromSync } from '../../../../lib/event-status'
 import {
   FRIENDLY_VALUES,
   PARKING_STATUSES,
+  PRICE_TYPES,
   RESERVATION_STATUSES,
   VENUE_TYPES,
 } from '../../../../lib/event-visit-attrs'
@@ -72,6 +74,12 @@ let eventTranslation: EventTranslationRow | null = null
 let reactionTranslation: ReactionSummaryTranslationRow | null = null
 let translationLoadNote: string | null = null
 let eventSourceCount = 0
+let generatedImageUrl: string | null = null
+let generatedImageStatus = 'none'
+let generatedImageSource: string | null = null
+let generatedImageInstruction: string | null = null
+let generatedImageUpdatedAt: string | null = null
+let generatedImageNote: string | null = null
 let loadError: string | null = null
 let message: string | null = null
 let errorMessage: string | null = Astro.url.searchParams.get('error')
@@ -107,7 +115,11 @@ if (sp.get('saved') === '1') {
   message = '英語翻訳を Hidden にしました'
 } else if (sp.get('translation_ai') === '1') {
   message = 'AI英語翻訳を生成しました（status=draft・要確認）'
-}
+  } else if (sp.get('generated') === 'pending' && sp.get('source') === 'upload') {
+    message = 'イメージ画像をアップロードしました（未確認）。Image Reviews で採用してください。'
+  } else if (sp.get('generated') === 'pending') {
+    message = 'イメージ画像を生成しました（未確認）。Image Reviews で採用してください。'
+  }
 
 try {
   const admin = createAdminClient()
@@ -130,6 +142,41 @@ try {
       .select('*', { count: 'exact', head: true })
       .eq('event_id', eventId)
     eventSourceCount = srcCount ?? 0
+
+    const generatedSelect =
+      'generated_image_url, generated_image_status, generated_image_source, generated_image_instruction, updated_at'
+    let generated = await admin
+      .from('events')
+      .select(generatedSelect)
+      .eq('id', eventId)
+      .maybeSingle()
+    if (
+      generated.error &&
+      /generated_image_source|generated_image_instruction/i.test(generated.error.message)
+    ) {
+      generatedImageNote =
+        '生成方法の列はまだありません。migration 適用後に表示できます。'
+      generated = await admin
+        .from('events')
+        .select('generated_image_url, generated_image_status, updated_at')
+        .eq('id', eventId)
+        .maybeSingle()
+    }
+    if (generated.error) {
+      generatedImageNote =
+        'generated_image 列がまだありません。migration 適用後に生成できます。'
+    } else {
+      generatedImageUrl =
+        (generated.data?.generated_image_url as string | null) ?? null
+      generatedImageStatus =
+        (generated.data?.generated_image_status as string | null) || 'none'
+      generatedImageSource =
+        (generated.data?.generated_image_source as string | null) ?? null
+      generatedImageInstruction =
+        (generated.data?.generated_image_instruction as string | null) ?? null
+      generatedImageUpdatedAt =
+        (generated.data?.updated_at as string | null) ?? null
+    }
 
     const { data: reactionData, error: reactionError } = await admin
       .from('event_reaction_summaries')
@@ -437,13 +484,25 @@ const publicEnHref =
               未設定は空欄のまま。推測で確定しない。金額単位は円（JPY）。
             </p>
             <label>
-              <AdminFieldLabel field="is_free" />
-              <select name="is_free">
-                <option value="" selected={event.is_free == null}>{IS_FREE_LABELS.unset}</option>
-                <option value="true" selected={event.is_free === true}>{IS_FREE_LABELS.free}</option>
-                <option value="false" selected={event.is_free === false}>{IS_FREE_LABELS.paid}</option>
+              <AdminFieldLabel field="price_type" />
+              <select name="price_type">
+                <option value="" selected={event.price_type == null}>{PRICE_TYPE_LABELS.unset}</option>
+                {PRICE_TYPES.map((value) => (
+                  <option value={value} selected={event.price_type === value}>{PRICE_TYPE_LABELS[value]}</option>
+                ))}
               </select>
             </label>
+            <label>
+              <AdminFieldLabel field="is_night" />
+              <select name="is_night">
+                <option value="" selected={event.is_night == null}>{IS_NIGHT_LABELS.unset}</option>
+                <option value="true" selected={event.is_night === true}>{IS_NIGHT_LABELS.night}</option>
+                <option value="false" selected={event.is_night === false}>{IS_NIGHT_LABELS.notNight}</option>
+              </select>
+            </label>
+            <p class="field-hint">
+              夜どこ行く？の候補です。遅くまで開いているだけでは付けません。
+            </p>
             <div class="form-row">
               <label>
                 <AdminFieldLabel field="price_min" />
@@ -693,6 +752,84 @@ const publicEnHref =
                 ) : (
                   <p class="hint">画像未設定</p>
                 )}
+              </div>
+              <div class="admin-panel">
+                <h3 class="subhead">イメージ画像</h3>
+                {generatedImageNote && <p class="hint">{generatedImageNote}</p>}
+                <p class="hint">
+                  status: {generatedImageStatus}
+                  {generatedImageSource === 'openai' ? ' · 生成方法: OpenAI' : ''}
+                  {generatedImageSource === 'upload' ? ' · 生成方法: アップロード' : ''}
+                  {generatedImageUrl ? ` · ${generatedImageUrl}` : ''}
+                </p>
+                {generatedImageInstruction && (
+                  <p class="hint">追加指示: {generatedImageInstruction}</p>
+                )}
+                {generatedImageUrl && (
+                  <img
+                    src={generatedImageUpdatedAt
+                      ? `${generatedImageUrl}?v=${encodeURIComponent(generatedImageUpdatedAt)}`
+                      : generatedImageUrl}
+                    alt=""
+                    width="320"
+                    height="180"
+                    loading="lazy"
+                  />
+                )}
+                <form id="concept-image-form" method="post" action="/admin/events/">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input
+                    type="hidden"
+                    name="intent"
+                    value={generatedImageStatus === 'none'
+                      ? 'generated_image_create'
+                      : 'generated_image_regenerate'}
+                  />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <input type="hidden" name="return_to" value={`/admin/events/${event.id}/`} />
+                  <button type="submit" class="btn" form="concept-image-form">
+                    {generatedImageStatus === 'none'
+                      ? '標準設定でイメージ画像を生成'
+                      : '標準設定で再生成'}
+                  </button>
+                </form>
+                <form method="post" action="/admin/events/">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="generated_image_custom" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <input type="hidden" name="return_to" value={`/admin/events/${event.id}/`} />
+                  <label>
+                    追加指示（任意）
+                    <textarea
+                      name="generated_image_instruction"
+                      rows="3"
+                      maxlength="800"
+                      placeholder="例：人物なし。複数種類のカレーを見せる。明るく上質な写真調。"
+                    ></textarea>
+                  </label>
+                  <button type="submit" class="btn">
+                    {generatedImageStatus === 'none' ? '追加指示で生成' : '追加指示で再生成'}
+                  </button>
+                </form>
+                <form method="post" action="/admin/events/" enctype="multipart/form-data">
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <input type="hidden" name="intent" value="generated_image_upload" />
+                  <input type="hidden" name="event_id" value={String(event.id)} />
+                  <input type="hidden" name="return_to" value={`/admin/events/${event.id}/`} />
+                  <label>
+                    用意した画像
+                    <input
+                      type="file"
+                      name="generated_image_file"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                      required
+                    />
+                  </label>
+                  <button type="submit" class="btn">画像をアップロード</button>
+                </form>
+                <p class="hint">
+                  1回の操作で1枚です。標準・追加指示・アップロードのあと、採用は Image Reviews です。
+                </p>
               </div>
               <label>
                 <AdminFieldLabel field="image_url" />

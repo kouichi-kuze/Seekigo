@@ -25,9 +25,12 @@ export const PARKING_STATUSES = [
 ] as const
 export type ParkingStatus = (typeof PARKING_STATUSES)[number]
 
+/** 料金区分。未設定は NULL。unknown は持たない。 */
+export const PRICE_TYPES = ['free', 'partially_paid', 'paid', 'varies'] as const
+export type PriceType = (typeof PRICE_TYPES)[number]
+
 /** New + related columns for admin select / mappers */
 export const EVENT_VISIT_ATTR_COLUMNS = [
-  'is_free',
   'price_min',
   'price_max',
   'reservation_status',
@@ -47,10 +50,10 @@ export const EVENT_VISIT_ATTR_COLUMNS = [
   'duration_minutes_max',
   'parking_status',
   'parking_text',
+  'price_type',
 ] as const
 
 export type EventVisitAttrs = {
-  is_free?: boolean | null
   price_min?: number | null
   price_max?: number | null
   reservation_status?: ReservationStatus | null
@@ -70,6 +73,7 @@ export type EventVisitAttrs = {
   duration_minutes_max?: number | null
   parking_status?: ParkingStatus | null
   parking_text?: string | null
+  price_type?: PriceType | null
 }
 
 export function parseTriBool(raw: string): boolean | null {

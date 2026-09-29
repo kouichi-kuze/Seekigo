@@ -6,7 +6,20 @@
  */
 import Layout from '../../../../layouts/Layout.astro'
 import { supabase } from '../../../../lib/supabase'
-import { isEventEnded } from '../../../../lib/display'
+import { formatEventPlaceLine, isEventEnded } from '../../../../lib/display'
+import {
+  buildEventDetailChips,
+  fetchEventOccurrences,
+  formatScheduleDates,
+  formatTimedOccurrenceSchedule,
+  mergeOccurrenceSpans,
+  resolveDisplaySpans,
+  resolveScheduleStatus,
+  useParentTimeFallback,
+} from '../../../../lib/event-schedule'
+import { selectRelatedEvents } from '../../../../lib/event-related'
+import { loadScheduledPublishedEvents } from '../../../../lib/events'
+import RelatedEvents from '../../../../components/RelatedEvents.astro'
 import { resolveEventDisplayImage } from '../../../../lib/event-image-usage'
 import EventReactionSummary from '../../../../components/EventReactionSummary.astro'
 import EventVisitChecklist from '../../../../components/EventVisitChecklist.astro'
@@ -19,12 +32,17 @@ import {
 import {
   EVENT_UI_EN,
   formatDurationEn,
-  formatEventDateRangeEn,
   formatEventTimeRangeEn,
+  formatPriceClassEn,
   formatPriceEn,
   formatReservationStatusEn,
 } from '../../../../lib/i18n/event-en'
 import { getLocalizedEventPath } from '../../../../lib/i18n/locale'
+import {
+  absoluteSiteUrl,
+  buildEnEventDescription,
+  buildEventJsonLd,
+} from '../../../../lib/event-page-seo'
 
 export async function getStaticPaths() {
   const { data: events } = await supabase
@@ -61,10 +79,41 @@ const priceTextEn = translation?.price_text?.trim() || null
 const accessTextEn = translation?.access_text?.trim() || null
 const parkingTextEn = translation?.parking_text?.trim() || null
 
-const dateLabel = formatEventDateRangeEn(event?.start_date, event?.end_date)
-const timeLabel = event
-  ? formatEventTimeRangeEn(event.start_time, event.end_time)
+const occurrenceRows = event?.id
+  ? await fetchEventOccurrences(supabase, Number(event.id))
   : null
+const occurrenceSpans =
+  occurrenceRows && occurrenceRows.length > 0
+    ? mergeOccurrenceSpans(occurrenceRows)
+    : []
+const timedSchedule =
+  occurrenceRows && occurrenceRows.length > 0
+    ? formatTimedOccurrenceSchedule(occurrenceRows, 'en')
+    : null
+const dateLabel =
+  timedSchedule ??
+  formatScheduleDates(
+    occurrenceSpans,
+    { start_date: event?.start_date, end_date: event?.end_date },
+    'en',
+  )
+const scheduleStatus = resolveScheduleStatus(occurrenceSpans, {
+  start_date: event?.start_date,
+  end_date: event?.end_date,
+})
+const placeLabel = formatEventPlaceLine(event?.municipality, event?.area)
+const headerChips = buildEventDetailChips({
+  locale: 'en',
+  status: scheduleStatus,
+  priceType: event?.price_type,
+  isKids: event?.is_kids,
+  isIndoor: event?.is_indoor,
+  isNight: event?.is_night,
+})
+const timeLabel =
+  event && useParentTimeFallback(occurrenceRows)
+    ? formatEventTimeRangeEn(event.start_time, event.end_time)
+    : null
 const displayImage = event ? resolveEventDisplayImage(event) : null
 const imageCredit =
   displayImage?.kind === 'external' && event?.image_credit
@@ -72,13 +121,11 @@ const imageCredit =
     : null
 const isEnded = event ? isEventEnded(event.start_date, event.end_date) : false
 
-const structuredAdmission = event ? formatPriceEn(event) : null
-/** Structured price preferred; EN price_text only as supplement / fallback */
-const admissionLabel = structuredAdmission
-  ? structuredAdmission
-  : priceTextEn
+const priceClassEn = event ? formatPriceClassEn(event.price_type) : null
+const structuredYen = event ? formatPriceEn(event) : null
+const admissionLabel = priceClassEn
 const admissionNote =
-  structuredAdmission && priceTextEn ? priceTextEn : null
+  priceTextEn || (event?.price_type === 'paid' ? structuredYen : null)
 const reservationLabel = event
   ? formatReservationStatusEn(event.reservation_status)
   : null
@@ -104,7 +151,26 @@ const hasBasicInfo = Boolean(
       ageNoteEn),
 )
 
-const showNightTag = Boolean(event?.is_night)
+const sourceSpans = resolveDisplaySpans(occurrenceSpans, {
+  start_date: event?.start_date,
+  end_date: event?.end_date,
+})
+const relatedEvents = event
+  ? selectRelatedEvents(
+      {
+        id: event.id,
+        area: event.area,
+        municipality: event.municipality,
+        category: event.category,
+        schedule_spans: sourceSpans,
+      },
+      await loadScheduledPublishedEvents(),
+    )
+  : []
+const relatedHeading =
+  scheduleStatus === 'ended'
+    ? EVENT_UI_EN.relatedEnded
+    : EVENT_UI_EN.relatedCurrent
 
 const reactionSummary = event
   ? await fetchPublishedReactionSummary(supabase, Number(event.id))
@@ -136,10 +202,32 @@ const hreflangAlternates =
 
 const pageTitle = event ? `${displayTitle} | Seekigo` : 'Seekigo'
 const metaDescription = event
-  ? summaryEn
-    ? summaryEn.slice(0, 160)
-    : `Event information for ${displayTitle} in Tokyo, including dates, venue, admission, access and visitor tips.`
+  ? buildEnEventDescription({ title: displayTitle, summaryEn })
   : 'Tokyo event information on Seekigo.'
+const pageUrl = enPath ? absoluteSiteUrl(enPath, Astro.site) : null
+const shareImage = displayImage?.src
+  ? absoluteSiteUrl(displayImage.src, Astro.site)
+  : null
+const jsonLd =
+  event && pageUrl
+    ? buildEventJsonLd({
+        name: displayTitle,
+        description: metaDescription,
+        url: pageUrl,
+        image: shareImage,
+        venue: event.venue,
+        address: event.address,
+        occurrenceSpans,
+        parent: { start_date: event.start_date, end_date: event.end_date },
+        parentStartTime: event.start_time,
+        parentEndTime: event.end_time,
+        occurrences: occurrenceRows,
+        priceType: event.price_type,
+        priceMin: event.price_min,
+        priceMax: event.price_max,
+        officialUrl: event.official_url,
+      })
+    : null
 
 const L = EVENT_UI_EN
 ---
@@ -147,6 +235,9 @@ const L = EVENT_UI_EN
 <Layout
   title={pageTitle}
   description={metaDescription}
+  ogImage={shareImage ?? undefined}
+  ogImageAlt={displayTitle}
+  jsonLd={jsonLd ?? undefined}
   locale="en"
   hreflangAlternates={hreflangAlternates}
   eventLanguageSwitcher={
@@ -171,11 +262,22 @@ const L = EVENT_UI_EN
         </nav>
 
         <header class="event-header">
-          {showNightTag && (
+          {headerChips.length > 0 && (
             <div class="event-tags">
-              <span class="tag">{L.night}</span>
+              {headerChips.map((chip) => (
+                <span
+                  class:list={[
+                    'tag',
+                    chip.id === 'status' && scheduleStatus === 'ended' && 'tag--ended',
+                    chip.id === 'status' && scheduleStatus === 'today' && 'tag--today',
+                  ]}
+                >
+                  {chip.label}
+                </span>
+              ))}
             </div>
           )}
+          {placeLabel && <p class="event-area" lang="ja">{placeLabel}</p>}
           <h1 class="event-title" lang={titleLang}>{displayTitle}</h1>
         </header>
 
@@ -195,6 +297,9 @@ const L = EVENT_UI_EN
               <div class="event-image__ended" aria-hidden="true">
                 <span class="event-image__ended-label">{L.ended}</span>
               </div>
+            )}
+            {displayImage.kind === 'generated' && (
+              <span class="event-image__concept">{L.illustrativeImage}</span>
             )}
             {imageCredit && <p class="event-image__credit">{imageCredit}</p>}
           </div>
@@ -346,6 +451,8 @@ const L = EVENT_UI_EN
           </p>
         </section>
 
+        <RelatedEvents heading={relatedHeading} events={relatedEvents} locale="en" />
+
         <p class="back-link">
           <a href="/tokyo/">{L.backToList}</a>
         </p>
@@ -420,6 +527,20 @@ const L = EVENT_UI_EN
     border-radius: var(--r-sm);
     letter-spacing: 0.02em;
   }
+  .tag--today {
+    background: var(--c-primary);
+    color: var(--c-white);
+  }
+  .tag--ended {
+    background: #e5e7eb;
+    color: #4b5563;
+  }
+  .event-area {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--c-primary);
+    letter-spacing: 0.02em;
+  }
   .event-title {
     font-size: clamp(22px, 5vw, 40px);
     font-weight: 800;
@@ -463,6 +584,19 @@ const L = EVENT_UI_EN
     justify-content: center;
     background: rgba(17, 24, 39, 0.42);
     pointer-events: none;
+  }
+  .event-image__concept {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 2;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #fff;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    background: rgba(17, 24, 39, 0.62);
   }
   .event-image__ended-label {
     font-size: 15px;

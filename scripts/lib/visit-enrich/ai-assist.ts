@@ -12,7 +12,7 @@ const MODEL =
   'gpt-4.1-nano'
 
 const TARGET_FIELDS: VisitFieldName[] = [
-  'is_free',
+  'price_type',
   'reservation_status',
   'venue_type',
   'family_friendly',
@@ -113,7 +113,7 @@ Return JSON only.`
           'unknown',
           null,
         ],
-        is_free: [true, false, null],
+        price_type: ['free', 'partially_paid', 'paid', 'varies', null],
       },
     },
     null,

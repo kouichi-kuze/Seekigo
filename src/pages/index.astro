@@ -1,18 +1,10 @@
 ---
 import Layout from '../layouts/Layout.astro'
-import { supabase } from '../lib/supabase'
 import EventCard from '../components/EventCard.astro'
+import { getPublishedEvents } from '../lib/events'
 import SeekigoLogo from '../components/brand/SeekigoLogo.astro'
 
-const { data: events, error } = await supabase
-  .from('events')
-  .select('*')
-  .eq('status', 'published')
-  .order('start_date', { ascending: true })
-
-if (error) {
-  console.error(error)
-}
+const events = await getPublishedEvents()
 ---
 
 <Layout
@@ -134,10 +126,13 @@ if (error) {
   }
 
   function isOnDate(card: HTMLElement, targetDate: string): boolean {
-    const start = card.dataset.start
-    const end   = card.dataset.end || start
-    if (!start) return false
-    return start <= targetDate && targetDate <= (end || start)
+    const raw = card.dataset.spans ?? ''
+    if (!raw) return false
+    return raw.split(',').some((part) => {
+      const [start, end] = part.split('/')
+      if (!start) return false
+      return start <= targetDate && targetDate <= (end || start)
+    })
   }
 
   function getDefaultFilter(): string {

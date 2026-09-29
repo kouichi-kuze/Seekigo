@@ -17,7 +17,9 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { getGotokyoLimit } from './lib/gotokyo-limit'
 import {
   cleanAddressAccess,
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
+  normalizePriceType,
+  neighborhoodAreaCandidate,
   resolveEventPlace,
 } from '../src/lib/event-field-rules'
 import { normalizeHmToDb } from '../src/lib/event-time-rules'
@@ -67,7 +69,7 @@ type EnrichedEvent = {
   image_url: string | null
   source_url: string | null
   area: string | null
-  is_free: boolean | null
+  price_type?: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -97,7 +99,7 @@ type EventRow = {
   start_time: string | null
   end_time: string | null
   price_text: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -237,11 +239,9 @@ function validateEvent(
     address,
     venue: event.venue,
   })
-  const ruleIsFree = inferIsFreeFromPriceText(event.price_text)
-  const is_free =
-    ruleIsFree !== null
-      ? ruleIsFree
-      : normalizeNullableBoolean(event.is_free)
+  const price_type =
+    inferPriceTypeFromPriceText(event.price_text) ??
+    normalizePriceType(event.price_type)
 
   return {
     ok: true,
@@ -260,7 +260,7 @@ function validateEvent(
       start_time: normalizeHmToDb(event.start_time) ?? null,
       end_time: normalizeHmToDb(event.end_time) ?? null,
       price_text: event.price_text ?? null,
-      is_free,
+      price_type,
       is_indoor: normalizeNullableBoolean(event.is_indoor),
       is_kids: normalizeNullableBoolean(event.is_kids),
       is_night: normalizeNullableBoolean(event.is_night),
@@ -432,7 +432,7 @@ async function updateDraftBody(
     last_checked_at: row.last_checked_at,
     updated_at: new Date().toISOString(),
   }
-  if (row.is_free !== null) patch.is_free = row.is_free
+  if (row.price_type !== null) patch.price_type = row.price_type
   if (imageChanged) {
     patch.image_usage_status = 'unknown'
     patch.image_credit = null
@@ -578,7 +578,6 @@ async function main() {
                 official_url: row.official_url,
                 source_url: row.source_url,
                 price_text: row.price_text,
-                is_free: row.is_free,
                 address: row.address,
                 category: row.category,
                 summary: row.summary,
@@ -648,10 +647,10 @@ async function main() {
                   start_time: row.start_time,
                   end_time: row.end_time,
                   venue: row.venue,
-                  area: row.dedupeArea,
+                  area: neighborhoodAreaCandidate(row.dedupeArea),
                   address: row.address,
                   price_text: row.price_text,
-                  is_free: row.is_free,
+                  price_type: row.price_type,
                   category: row.category,
                   official_url: row.official_url,
                 },

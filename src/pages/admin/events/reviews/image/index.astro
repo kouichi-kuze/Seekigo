@@ -19,6 +19,16 @@ const EVENT_SELECT =
   'id, title, slug, category, image_url, image_usage_status, image_source, image_credit, status'
 
 let events: AdminEvent[] = []
+let generatedReviews: Array<{
+  id: number | string
+  title: string | null
+  generated_image_url: string | null
+  generated_image_status: string | null
+  generated_image_source?: string | null
+  generated_image_instruction?: string | null
+  updated_at?: string | null
+}> = []
+let generatedNote: string | null = null
 let loadError: string | null = null
 let message: string | null = null
 
@@ -27,6 +37,12 @@ if (sp.get('image') === 'updated') {
   message = `更新しました (event_id=${sp.get('event_id') ?? '?'}, status=${sp.get('status') ?? '?'})`
 } else if (sp.get('image') === 'bulk') {
   message = `${sp.get('count') ?? '?'}件を一括更新 (status=${sp.get('status') ?? '?'})`
+} else if (sp.get('generated') === 'pending' && sp.get('source') === 'upload') {
+  message = `イメージ画像をアップロードしました（未確認） event_id=${sp.get('event_id') ?? '?'}`
+} else if (sp.get('generated') === 'pending') {
+  message = `イメージ画像を生成しました（未確認） event_id=${sp.get('event_id') ?? '?'}`
+} else if (sp.get('generated') === 'approved' || sp.get('generated') === 'rejected') {
+  message = `イメージ画像を ${sp.get('generated')} にしました（event_id=${sp.get('event_id') ?? '?'}）`
 }
 
 try {
@@ -39,12 +55,51 @@ try {
     .order('id', { ascending: true })
   if (error) throw error
   events = (data ?? []) as AdminEvent[]
+
+  let generated = await admin
+    .from('events')
+    .select(
+      'id, title, generated_image_url, generated_image_status, generated_image_source, generated_image_instruction, updated_at',
+    )
+    .eq('generated_image_status', 'pending')
+    .order('id', { ascending: true })
+  if (
+    generated.error &&
+    /generated_image_source|generated_image_instruction/i.test(generated.error.message)
+  ) {
+    generatedNote = '生成方法の列はまだありません。migration 適用後に表示できます。'
+    generated = await admin
+      .from('events')
+      .select('id, title, generated_image_url, generated_image_status, updated_at')
+      .eq('generated_image_status', 'pending')
+      .order('id', { ascending: true })
+  }
+  if (generated.error) {
+    generatedNote = '生成画像の列はまだありません。migration 適用後にレビューできます。'
+  } else {
+    generatedReviews = (generated.data ?? []) as typeof generatedReviews
+  }
 } catch (e) {
   loadError = e instanceof Error ? e.message : String(e)
 }
 
 function usageStatusOf(event: AdminEvent): string {
   return event.image_usage_status?.trim() || 'unknown'
+}
+
+function generatedSourceLabel(source: string | null | undefined): string | null {
+  if (source === 'openai') return 'OpenAI'
+  if (source === 'upload') return 'アップロード'
+  return null
+}
+
+function generatedPreviewSrc(
+  url: string | null,
+  updatedAt: string | null | undefined,
+): string {
+  if (!url) return ''
+  if (!updatedAt) return url
+  return `${url}?v=${encodeURIComponent(updatedAt)}`
 }
 ---
 
@@ -57,6 +112,85 @@ function usageStatusOf(event: AdminEvent): string {
   </p>
   {message && <p class="ok">{message}</p>}
   {loadError && <p class="err">{loadError}</p>}
+  {generatedNote && <p class="hint">{generatedNote}</p>}
+
+  <section class="admin-panel">
+    <h2>生成イメージ（未確認）</h2>
+    {generatedReviews.length === 0 ? (
+      <p class="hint">pending のイメージ画像はありません。</p>
+    ) : (
+      generatedReviews.map((event) => (
+        <article class="image-card" id={`generated-${event.id}`}>
+          <h3>
+            <a href={`/admin/events/${event.id}/`}>{event.title}</a>
+          </h3>
+          {event.generated_image_url && (
+            <img
+              src={generatedPreviewSrc(event.generated_image_url, event.updated_at)}
+              alt=""
+              width="320"
+              height="180"
+              loading="lazy"
+            />
+          )}
+          {generatedSourceLabel(event.generated_image_source) && (
+            <p class="hint">生成方法: {generatedSourceLabel(event.generated_image_source)}</p>
+          )}
+          {event.generated_image_instruction && (
+            <p class="hint">追加指示: {event.generated_image_instruction}</p>
+          )}
+          <form method="POST" action="/admin/events/">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+            <input type="hidden" name="return_to" value="/admin/events/reviews/image/" />
+            <button type="submit" name="intent" value="generated_image_approve">採用</button>
+            <button type="submit" name="intent" value="generated_image_reject">不採用</button>
+          </form>
+          <form method="POST" action="/admin/events/">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="generated_image_regenerate" />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+            <input type="hidden" name="return_to" value="/admin/events/reviews/image/" />
+            <button type="submit">標準設定で再生成</button>
+          </form>
+          <form method="POST" action="/admin/events/">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="generated_image_custom" />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+            <input type="hidden" name="return_to" value="/admin/events/reviews/image/" />
+            <label>
+              追加指示（任意）
+              <textarea
+                name="generated_image_instruction"
+                rows="3"
+                maxlength="800"
+                placeholder="例：人物なし。複数種類のカレーを見せる。明るく上質な写真調。"
+              ></textarea>
+            </label>
+            <button type="submit">追加指示で再生成</button>
+          </form>
+          <form method="POST" action="/admin/events/" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="generated_image_upload" />
+            <input type="hidden" name="event_id" value={String(event.id)} />
+            <input type="hidden" name="return_to" value="/admin/events/reviews/image/" />
+            <label>
+              用意した画像
+              <input
+                type="file"
+                name="generated_image_file"
+                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                required
+              />
+            </label>
+            <button type="submit">画像をアップロード</button>
+          </form>
+        </article>
+      ))
+    )}
+  </section>
+
+  <h2>公式画像の利用</h2>
 
   {
     events.map((event) => {
@@ -131,7 +265,8 @@ function usageStatusOf(event: AdminEvent): string {
   }
 
   .image-card select,
-  .image-card input {
+  .image-card input,
+  .image-card textarea {
     display: block;
     margin-top: 0.25rem;
     min-width: min(100%, 24rem);

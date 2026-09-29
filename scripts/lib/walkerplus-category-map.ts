@@ -15,7 +15,7 @@ const EXPERIENCE_RE = /体験イベント|アクティビティ|体験型/
 const FESTIVAL_RE = /^祭り$|フェスティバル|パレード/
 const FOOD_RE = /グルメ|フード|物産|ビアガーデン|グルメ・フード/
 const KIDS_RE = /子供|子ども|キッズ|ファミリー|親子/
-const EXHIBITION_RE = /美術展|博物|展覧会|特別展|企画展/
+const EXHIBITION_RE = /美術展|博物|展覧会|特別展|企画展|展示会/
 const MUSIC_RE = /ライブ|音楽|コンサート/
 const SPORTS_RE = /スポーツ/
 const SEASONAL_RE = /花火|紅葉|イルミ|クリスマス|花見|季節|夏祭|ハロウィン|ライトアップ/
@@ -28,7 +28,8 @@ function mapSingleWalkerplusCategory(raw: string): CategoryValue | null {
 
   if (EXHIBITION_RE.test(t)) return 'exhibition'
   if (ANIME_GAME_RE.test(t)) return 'exhibition'
-  if (COMMERCIAL_RE.test(t)) return 'other'
+  // 商業施設だけではカテゴリを足さない。他に対応が無いときだけ末尾で other になる。
+  if (COMMERCIAL_RE.test(t)) return null
   if (EXPERIENCE_RE.test(t)) return 'workshop'
   if (FESTIVAL_RE.test(t)) return 'festival'
   if (FOOD_RE.test(t)) return 'food'

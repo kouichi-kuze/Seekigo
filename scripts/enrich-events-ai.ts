@@ -17,8 +17,11 @@ import {
 } from './lib/ai-enrichment'
 import {
   cleanAddressAccess,
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
+  normalizePriceType,
+  inferIsNight,
   resolveAreaSlug,
+  resolveIsNight,
 } from '../src/lib/event-field-rules'
 
 config()
@@ -69,8 +72,8 @@ type EnrichedEvent = {
   source_url: string
   area: string | null
   area_reason: string | null
-  is_free: boolean | null
-  is_free_reason: string | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
+  price_type_reason: string | null
   is_indoor: boolean | null
   is_indoor_reason: string | null
   is_kids: boolean | null
@@ -108,8 +111,8 @@ function emptyEnrichment(error: string): Omit<
   return {
     area: null,
     area_reason: null,
-    is_free: null,
-    is_free_reason: null,
+    price_type: null,
+    price_type_reason: null,
     is_indoor: null,
     is_indoor_reason: null,
     is_kids: null,
@@ -128,7 +131,8 @@ function mergeEnrichment(event: SourceEvent, ai: AiEnrichment): EnrichedEvent {
     address: facts.address,
     venue: facts.venue,
   })
-  const ruleIsFree = inferIsFreeFromPriceText(facts.price_text)
+  const rulePriceType = inferPriceTypeFromPriceText(facts.price_text)
+  const priceType = rulePriceType ?? normalizePriceType(ai.price_type?.value)
 
   return {
     ...facts,
@@ -136,16 +140,34 @@ function mergeEnrichment(event: SourceEvent, ai: AiEnrichment): EnrichedEvent {
     area_reason: ruleArea
       ? `deterministic: ${ruleArea}`
       : (ai.area?.reason ?? null),
-    is_free: ruleIsFree ?? ai.is_free?.value ?? null,
-    is_free_reason: ruleIsFree !== null
-      ? `deterministic: ${ruleIsFree}`
-      : (ai.is_free?.reason ?? null),
+    price_type: priceType,
+    price_type_reason: rulePriceType
+      ? `deterministic: ${rulePriceType}`
+      : (ai.price_type?.reason ?? null),
     is_indoor: ai.is_indoor?.value ?? null,
     is_indoor_reason: ai.is_indoor?.reason ?? null,
     is_kids: ai.is_kids?.value ?? null,
     is_kids_reason: ai.is_kids?.reason ?? null,
-    is_night: ai.is_night?.value ?? null,
-    is_night_reason: ai.is_night?.reason ?? null,
+    is_night: resolveIsNight(
+      inferIsNight({
+        title: facts.title,
+        summary: ai.summary,
+        venue: facts.venue,
+        description: facts.description,
+        startTime: facts.start_time,
+        endTime: facts.end_time,
+      }),
+      ai.is_night?.value,
+    ),
+    is_night_reason: inferIsNight({
+      title: facts.title,
+      summary: ai.summary,
+      venue: facts.venue,
+      startTime: facts.start_time,
+      endTime: facts.end_time,
+    }) === true
+      ? 'night outing'
+      : (ai.is_night?.reason ?? null),
     category: ai.category,
     summary: ai.summary,
     ai_error: null,
@@ -159,7 +181,7 @@ function logEnriched(index: number, event: EnrichedEvent) {
     console.log(`[enrich-events-ai] ai_error: ${event.ai_error}`)
   }
   console.log(`[enrich-events-ai] area: ${event.area}`)
-  console.log(`[enrich-events-ai] is_free: ${event.is_free}`)
+  console.log(`[enrich-events-ai] price_type: ${event.price_type}`)
   console.log(`[enrich-events-ai] is_indoor: ${event.is_indoor}`)
   console.log(`[enrich-events-ai] is_kids: ${event.is_kids}`)
   console.log(`[enrich-events-ai] is_night: ${event.is_night}`)
@@ -235,15 +257,15 @@ async function main() {
         address: facts.address,
         venue: facts.venue,
       })
-      const ruleIsFree = inferIsFreeFromPriceText(facts.price_text)
+      const rulePriceType = inferPriceTypeFromPriceText(facts.price_text)
       const failed: EnrichedEvent = {
         ...facts,
         ...emptyEnrichment(message),
         area: ruleArea,
         area_reason: ruleArea ? `deterministic: ${ruleArea}` : null,
-        is_free: ruleIsFree,
-        is_free_reason:
-          ruleIsFree !== null ? `deterministic: ${ruleIsFree}` : null,
+        price_type: rulePriceType,
+        price_type_reason:
+          rulePriceType !== null ? `deterministic: ${rulePriceType}` : null,
       }
       enriched.push(failed)
       logEnriched(i, failed)

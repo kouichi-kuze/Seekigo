@@ -1,8 +1,10 @@
 /**
  * 公開イベントの municipality だけを埋める。area は変えない。
+ * 既に municipality がある行は更新しない。
  *
- * 対象は inferMunicipalitySlug が返す行だけ。
- * お台場・池袋・王子・吉祥寺、未知スラッグ、住所から自治体が一つに決まらない行はスキップする。
+ * inferMunicipalitySlug の優先順（住所 → 会場文 → area 対応）に従う。
+ * area スラッグ tama や「多摩」だけでは多摩市にしない。
+ * 住所に別の自治体があるとき、ueno などの area 対応では上書きしない。
  *
  * DRY_RUN=true（デフォルト）: 予定だけ表示
  * DRY_RUN=false: municipality が NULL の published 行だけ UPDATE
@@ -95,14 +97,18 @@ async function main() {
       area: row.area,
       address: row.address,
     })
+    const addressText = row.address?.normalize('NFKC') ?? ''
+    const bareTama =
+      areaKey === 'tama' &&
+      inferred === 'tama' &&
+      !addressText.includes('多摩市')
 
     if (row.municipality?.trim()) {
       alreadySet += 1
       continue
     }
-    if (!inferred) {
-      const address = row.address?.normalize('NFKC') ?? ''
-      const unlisted = /千代田区|文京区|府中市|小平市/.test(address)
+    if (bareTama || !inferred) {
+      const unlisted = /府中市|小平市/.test(addressText)
       if (areaKey && REVIEW.has(areaKey)) review += 1
       else if (unlisted) addressNeedsSlug += 1
       else unknown += 1

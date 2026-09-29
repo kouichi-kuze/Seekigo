@@ -11,7 +11,7 @@ import {
 } from './admin-security'
 import {
   cleanAddressAccess,
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
   resolveAreaSlug,
 } from './event-field-rules'
 import { defaultImageMetaForSource } from './event-image-usage'
@@ -43,7 +43,7 @@ type IncomingPayload = {
   source_url?: string | null
   source_event_id?: string | null
   price_text?: string | null
-  is_free?: boolean | null
+  price_type?: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   address?: string | null
   category?: string[] | null
   summary?: string | null
@@ -245,10 +245,14 @@ async function createNewDraft(
       address,
       venue: payload.venue,
     }) ?? null
-  const is_free =
-    typeof payload.is_free === 'boolean'
-      ? payload.is_free
-      : inferIsFreeFromPriceText(payload.price_text)
+  const price_type =
+    inferPriceTypeFromPriceText(payload.price_text) ??
+    (payload.price_type === 'free' ||
+    payload.price_type === 'partially_paid' ||
+    payload.price_type === 'paid' ||
+    payload.price_type === 'varies'
+      ? payload.price_type
+      : null)
   const slug = generateDraftSlug(sourceName, title, startDate, sourceUrl)
   const now = new Date().toISOString()
 
@@ -281,7 +285,7 @@ async function createNewDraft(
     start_time: payload.start_time ?? null,
     end_time: payload.end_time ?? null,
     price_text: payload.price_text ?? null,
-    is_free,
+    price_type,
     is_indoor: null,
     is_kids: null,
     is_night: null,

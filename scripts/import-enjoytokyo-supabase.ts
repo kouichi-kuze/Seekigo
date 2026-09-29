@@ -23,7 +23,9 @@ import type { DuplicateMatchResult, DuplicateStatus } from '../src/lib/event-ded
 import { formatDedupeLog } from '../src/lib/event-dedupe'
 import {
   cleanAddressAccess,
-  inferIsFreeFromPriceText,
+  inferPriceTypeFromPriceText,
+  inferIsNight,
+  neighborhoodAreaCandidate,
   resolveAreaSlug,
   resolveEventPlace,
 } from '../src/lib/event-field-rules'
@@ -212,7 +214,7 @@ type NewEventRow = {
   start_time: string | null
   end_time: string | null
   price_text: string | null
-  is_free: boolean | null
+  price_type: 'free' | 'partially_paid' | 'paid' | 'varies' | null
   is_indoor: boolean | null
   is_kids: boolean | null
   is_night: boolean | null
@@ -264,7 +266,7 @@ function validateNewDraft(
     address,
     venue: detail.venue,
   })
-  const is_free = inferIsFreeFromPriceText(detail.price_text)
+  const price_type = inferPriceTypeFromPriceText(detail.price_text)
 
   return {
     ok: true,
@@ -283,10 +285,15 @@ function validateNewDraft(
       start_time: normalizeHmToDb(detail.start_time) ?? null,
       end_time: normalizeHmToDb(detail.end_time) ?? null,
       price_text: detail.price_text ?? null,
-      is_free,
+      price_type,
       is_indoor: null,
       is_kids: null,
-      is_night: null,
+      is_night: inferIsNight({
+        title: detail.title,
+        venue: detail.venue,
+        startTime: detail.start_time,
+        endTime: detail.end_time,
+      }),
       category: [],
       summary: summaryFromDescription(detail.description),
       image_url: detail.image_url ?? null,
@@ -376,7 +383,7 @@ async function updateDraftBody(
   }
 
   // 既存 draft の area / municipality は同期で書き換えない
-  if (row.is_free !== null) patch.is_free = row.is_free
+  if (row.price_type !== null) patch.price_type = row.price_type
   if (imageChanged) {
     patch.image_usage_status = 'unknown'
     patch.image_credit = null
@@ -509,7 +516,6 @@ async function main() {
                 official_url: detail.official_url,
                 source_url: detail.source_url,
                 price_text: detail.price_text ?? null,
-                is_free: inferIsFreeFromPriceText(detail.price_text),
                 address: detail.address ?? null,
                 category: null,
                 summary: summaryFromDescription(detail.description),
@@ -606,12 +612,14 @@ async function main() {
               (typeof detail.address === 'string'
                 ? detail.address.trim() || null
                 : null)
-            const area = resolveImportArea({
-              area: detail.area,
-              address,
-              venue: detail.venue,
-            })
-            const is_free = inferIsFreeFromPriceText(detail.price_text)
+            const area = neighborhoodAreaCandidate(
+              resolveImportArea({
+                area: detail.area,
+                address,
+                venue: detail.venue,
+              }),
+            )
+            const price_type = inferPriceTypeFromPriceText(detail.price_text)
 
             await syncFieldReviewsForPublishedEvent(
               writeClient ?? readClient,
@@ -629,7 +637,7 @@ async function main() {
                   area,
                   address,
                   price_text: detail.price_text ?? null,
-                  is_free,
+                  price_type,
                   category: [],
                   official_url: detail.official_url ?? null,
                 },

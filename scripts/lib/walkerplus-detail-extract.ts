@@ -487,6 +487,51 @@ function extractImageCredit($: CheerioAPI): string | null {
   return null
 }
 
+export function walkerplusSummaryMaterial(
+  description: string | null | undefined,
+): string | null {
+  if (!description) return null
+  let text = description.normalize('NFKC').replace(/\s+/g, ' ').trim()
+  text = text.replace(/^.*?のイベント情報です。\s*/, '')
+  text = text.replace(/東京都の天気[^。．]*[。．]?/g, '')
+  text = text.replace(/本日\d+\s*℃[^。．]*[。．]?/g, '')
+  text = text.replace(/明日\d+\s*℃[^。．]*[。．]?/g, '')
+  const parts = text
+    .split(/(?<=[。．])/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const kept = parts.filter((part) => {
+    const compact = part.replace(/\s+/g, '')
+    if (/天気|℃/.test(compact)) return false
+    if (/^(?:料金|入場料|参加費|費用)/.test(compact)) return false
+    if (/^(?:アクセス|会場|開催場所|所在地)/.test(compact)) return false
+    if (/^\[?地図\]?$/.test(compact)) return false
+    if (/(?:\.{3}|…)/.test(compact)) return false
+    return /[。．]$/.test(compact)
+  })
+  const material = kept.join('').trim()
+  if ([...material].length < 24) return null
+  return material
+}
+
+export function walkerplusIncompleteNotes(
+  description: string | null | undefined,
+): string {
+  if (!description) return ''
+  let text = description.normalize('NFKC').replace(/\s+/g, ' ').trim()
+  text = text.replace(/^.*?のイベント情報です。\s*/, '')
+  const parts = text
+    .split(/(?<=[。．])/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  return parts
+    .filter((part) => {
+      const compact = part.replace(/\s+/g, '')
+      return /(?:\.{3}|…)/.test(compact) || !/[。．]$/.test(compact)
+    })
+    .join('')
+}
+
 export function extractWalkerplusDetail(
   html: string,
   pageUrl: string,

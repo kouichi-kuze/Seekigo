@@ -84,6 +84,11 @@ export type EventDisplayImage =
       categorySlug: string
     }
   | {
+      kind: 'generated'
+      src: string
+      showCredit: false
+    }
+  | {
       kind: 'generic'
       src: string
       categorySlug: typeof GENERIC_IMAGE_CATEGORY_SLUG
@@ -101,6 +106,8 @@ export function resolveEventDisplayImage(event: {
   image_usage_status?: string | null
   image_credit?: string | null
   category?: string | string[] | null
+  generated_image_url?: string | null
+  generated_image_status?: string | null
 }): EventDisplayImage {
   const externalUrl = resolvePublicImageUrl(event)
   if (externalUrl) {
@@ -108,6 +115,15 @@ export function resolveEventDisplayImage(event: {
       kind: 'external',
       src: externalUrl,
       showCredit: Boolean(event.image_credit?.trim()),
+    }
+  }
+
+  const generatedUrl = event.generated_image_url?.trim()
+  if (event.generated_image_status === 'approved' && generatedUrl) {
+    return {
+      kind: 'generated',
+      src: generatedUrl,
+      showCredit: false,
     }
   }
 

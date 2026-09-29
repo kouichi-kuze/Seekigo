@@ -17,6 +17,7 @@ import { normalizeHmToDb } from './event-time-rules'
 import {
   FRIENDLY_VALUES,
   PARKING_STATUSES,
+  PRICE_TYPES,
   RESERVATION_STATUSES,
   VENUE_TYPES,
   parseEnumValue,
@@ -127,7 +128,11 @@ export async function processAdminEventEditPost(opts: {
     area: emptyToNull(String(form.get('area') ?? '')),
     address: emptyToNull(String(form.get('address') ?? '')),
     price_text: emptyToNull(String(form.get('price_text') ?? '')),
-    is_free: parseTriBool(String(form.get('is_free') ?? '')),
+    price_type: parseEnumValue(
+      String(form.get('price_type') ?? ''),
+      PRICE_TYPES,
+    ),
+    is_night: parseTriBool(String(form.get('is_night') ?? '')),
     price_min: parseOptionalInt(String(form.get('price_min') ?? '')),
     price_max: parseOptionalInt(String(form.get('price_max') ?? '')),
     reservation_status: parseEnumValue(

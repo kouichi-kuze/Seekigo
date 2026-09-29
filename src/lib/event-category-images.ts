@@ -91,7 +91,6 @@ export function resolveImageCategorySlug(
   flags?: {
     is_kids?: boolean
     is_night?: boolean
-    is_free?: boolean
     is_indoor?: boolean
   }
 ): string {

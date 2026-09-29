@@ -12,10 +12,13 @@ export const ADMIN_EVENT_FIELD_LABELS = {
   venue: '会場',
   area: 'エリア',
   address: '住所',
-  is_free: '入場料',
+  is_kids: '子ども向け',
+  is_indoor: '屋内',
+  is_night: '夜向け',
   price_min: '最低料金',
   price_max: '最高料金',
   price_text: '料金詳細',
+  price_type: '料金区分',
   reservation_status: '予約',
   reservation_url: '予約URL',
   nearest_station: '最寄駅',
@@ -70,10 +73,18 @@ export const PARKING_STATUS_LABELS: Record<string, string> = {
   unknown: '不明',
 }
 
-export const IS_FREE_LABELS = {
+export const PRICE_TYPE_LABELS = {
   unset: '未設定',
   free: '無料',
+  partially_paid: '一部有料',
   paid: '有料',
+  varies: '内容による',
+} as const
+
+export const IS_NIGHT_LABELS = {
+  unset: '未判定',
+  night: '夜向け',
+  notNight: '夜向けではない',
 } as const
 
 export const IMAGE_USAGE_STATUS_LABELS: Record<string, string> = {

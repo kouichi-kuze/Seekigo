@@ -37,8 +37,8 @@ export function extractPriceFromText(
 
   if (freeHit && amounts.length === 0) {
     push(out, {
-      field: 'is_free',
-      proposed_value: true,
+      field: 'price_type',
+      proposed_value: 'free',
       confidence: 'high',
       reason: '本文に無料の明示',
       evidence_text: clipEvidence(freeHit[0]),
@@ -64,8 +64,8 @@ export function extractPriceFromText(
     const min = Math.min(...amounts)
     const max = Math.max(...amounts)
     push(out, {
-      field: 'is_free',
-      proposed_value: false,
+      field: 'price_type',
+      proposed_value: 'paid',
       confidence: 'high',
       reason: '本文に有料金額の明示',
       evidence_text: clipEvidence(yenMatches[0]?.[0] ?? `${min}円`),

@@ -25,7 +25,7 @@ export const FIELD_REVIEW_SENSITIVE_FIELDS = [
   'end_date',
   'official_url',
   'category',
-  'is_free',
+  'price_type',
   'reservation_status',
   'family_friendly',
   'venue_type',
@@ -64,6 +64,9 @@ export function fieldReviewStatusLabel(status: string): string {
 }
 
 export function fieldReviewFieldLabel(fieldName: string): string {
+  if (fieldName === 'is_kids') return '子ども向け'
+  if (fieldName === 'is_indoor') return '屋内'
+  if (fieldName === 'price_type') return '料金区分'
   return fieldName
 }
 

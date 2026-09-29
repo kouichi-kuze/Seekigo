@@ -1,8 +1,8 @@
 /**
  * published イベントのフィールド差分レビュー。
  * - sync は差分検知のみ（本体非変更）
- * - summary は AI 再生成ノイズのため対象外
- * - title / image_* / slug / status も対象外
+ * - summary は通常 sync では送らない。空の published への専用補完だけが提案する
+ * - title / image_* / slug / status は対象外
  * - Phase 4C-1: visit attrs を allowlist に追加
  */
 import { createHash } from 'node:crypto'
@@ -13,9 +13,11 @@ import {
   FRIENDLY_VALUES,
   PARKING_STATUSES,
   RESERVATION_STATUSES,
+  PRICE_TYPES,
   VENUE_TYPES,
   type FriendlyValue,
   type ParkingStatus,
+  type PriceType,
   type ReservationStatus,
   type VenueType,
 } from './event-visit-attrs'
@@ -30,7 +32,10 @@ export const REVIEWABLE_FIELD_NAMES = [
   'area',
   'address',
   'price_text',
-  'is_free',
+  'summary',
+  'price_type',
+  'is_kids',
+  'is_indoor',
   'price_min',
   'price_max',
   'category',
@@ -57,13 +62,10 @@ export const REVIEWABLE_FIELD_NAMES = [
 export type ReviewableFieldName = (typeof REVIEWABLE_FIELD_NAMES)[number]
 
 /**
- * summary を除外した理由:
- * - gotokyo: enrich が毎 sync で summary を再生成し、exact 時は published に載らないが
- *   incoming 側は毎回文言が揺れる → 差分ノイズ多発
- * - enjoytokyo: description 切り詰め / AI draft 経路があり、安定比較が難しい
- * - published の curated summary をソース由来要約で置き換えるのは危険
+ * 通常 sync は summary を proposed に含めない。
+ * Walkerplus の空 summary 補完だけが、人間確認用に summary を提案する。
  */
-export const SUMMARY_EXCLUDED_FROM_FIELD_REVIEW = true
+export const SUMMARY_EXCLUDED_FROM_FIELD_REVIEW = false
 
 /** field_name → events カラム（任意名を SQL に渡さない） */
 export const REVIEWABLE_FIELD_COLUMN: Record<
@@ -81,8 +83,11 @@ export type FieldSnapshot = {
   venue?: string | null
   area?: string | null
   address?: string | null
-  price_text?: string | null
-  is_free?: boolean | null
+    price_text?: string | null
+    summary?: string | null
+    price_type?: PriceType | null
+    is_kids?: boolean | null
+    is_indoor?: boolean | null
   price_min?: number | null
   price_max?: number | null
   category?: string[] | null
@@ -217,14 +222,18 @@ export function normalizeFieldForCompare(
       )
     }
     case 'price_text':
+    case 'summary':
     case 'nearest_station':
     case 'access_text':
     case 'age_note':
     case 'parking_text':
       return normalizeWhitespaceText(value)
-    case 'is_free':
+    case 'is_kids':
+    case 'is_indoor':
       if (value === true || value === false) return value
       return null
+    case 'price_type':
+      return normalizeEnum(value, PRICE_TYPES)
     case 'price_min':
     case 'price_max':
     case 'walk_minutes':
@@ -277,14 +286,18 @@ export function normalizeFieldForStorage(
     case 'address':
       return cleanAddressAccess(value == null ? null : String(value))
     case 'price_text':
+    case 'summary':
     case 'nearest_station':
     case 'access_text':
     case 'age_note':
     case 'parking_text':
       return normalizeWhitespaceText(value)
-    case 'is_free':
+    case 'is_kids':
+    case 'is_indoor':
       if (value === true || value === false) return value
       return null
+    case 'price_type':
+      return normalizeEnum(value, PRICE_TYPES)
     case 'price_min':
     case 'price_max':
     case 'walk_minutes':

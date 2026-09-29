@@ -34,7 +34,7 @@ const EMPTY_RESULT: SyncFieldReviewsResult = {
 }
 
 const EVENT_SELECT_FOR_DIFF =
-  'id, status, start_date, end_date, start_time, end_time, venue, area, address, price_text, is_free, price_min, price_max, category, official_url, reservation_status, reservation_url, nearest_station, access_text, walk_minutes, latitude, longitude, venue_type, family_friendly, date_friendly, solo_friendly, rain_friendly, age_note, duration_minutes_min, duration_minutes_max, parking_status, parking_text'
+  'id, status, start_date, end_date, start_time, end_time, venue, area, address, price_text, price_type, summary, price_min, price_max, category, official_url, reservation_status, reservation_url, nearest_station, access_text, walk_minutes, latitude, longitude, venue_type, family_friendly, date_friendly, solo_friendly, rain_friendly, age_note, duration_minutes_min, duration_minutes_max, parking_status, parking_text'
 
 function logFieldReview(
   kind: string,
@@ -75,8 +75,8 @@ function snapshotFromEventRow(row: Record<string, unknown>): FieldSnapshot {
     area: (row.area as string | null) ?? null,
     address: (row.address as string | null) ?? null,
     price_text: (row.price_text as string | null) ?? null,
-    is_free:
-      row.is_free === true || row.is_free === false ? row.is_free : null,
+    summary: (row.summary as string | null) ?? null,
+    price_type: asTextEnum(row.price_type) as FieldSnapshot['price_type'],
     price_min: asInt(row.price_min),
     price_max: asInt(row.price_max),
     category: Array.isArray(row.category) ? (row.category as string[]) : null,

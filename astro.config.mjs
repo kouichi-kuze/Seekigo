@@ -2,6 +2,29 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 
+/**
+ * @param {string | Uint8Array} body
+ * @param {string} contentType
+ */
+function formFields(body, contentType) {
+  if (typeof body === 'string' && !contentType.includes('multipart/form-data')) {
+    return new URLSearchParams(body);
+  }
+  const text = Buffer.from(body).toString('latin1');
+  const params = new URLSearchParams();
+  for (const name of ['intent', 'event_id', 'return_to', 'ajax', 'event_ids']) {
+    const marker = `name="${name}"`;
+    let idx = text.indexOf(marker);
+    while (idx >= 0) {
+      const after = text.indexOf('\r\n\r\n', idx);
+      const end = after >= 0 ? text.indexOf('\r\n', after + 4) : -1;
+      if (after >= 0 && end >= 0) params.append(name, text.slice(after + 4, end));
+      idx = text.indexOf(marker, idx + marker.length);
+    }
+  }
+  return params;
+}
+
 /** DEV のみ: static prerender では POST body が届かないため Vite 層で Publish を処理 */
 function seekigoAdminPublishDev() {
   return {
@@ -23,13 +46,33 @@ function seekigoAdminPublishDev() {
         });
         req.on('end', () => {
           void (async () => {
-            const body = Buffer.concat(chunks).toString('utf8');
+            const raw = Buffer.concat(chunks);
+            const contentType = String(req.headers['content-type'] ?? '');
+            const isMultipart = contentType.includes('multipart/form-data');
+            if (isMultipart && raw.length > 12 * 1024 * 1024) {
+              const tooBig = formFields(new Uint8Array(raw), contentType);
+              const back = tooBig.get('return_to') ?? '';
+              const eventId = tooBig.get('event_id') ?? '';
+              const failPath = back.startsWith('/admin/events/')
+                ? back.split('?')[0]
+                : eventId
+                  ? `/admin/events/${eventId}/`
+                  : '/admin/events/reviews/image/';
+              res.statusCode = 302;
+              res.setHeader(
+                'Location',
+                `${failPath}?error=${encodeURIComponent('画像ファイルが大きすぎます')}`,
+              );
+              res.end();
+              return;
+            }
+            const body = isMultipart ? new Uint8Array(raw) : raw.toString('utf8');
             if (process.env.NODE_ENV !== 'production') {
-              const params = new URLSearchParams(body);
+              const logged = formFields(body, contentType);
               console.log('[admin-dev] POST', path, {
-                intent: params.get('intent'),
-                event_id: params.get('event_id'),
-                event_ids: params.getAll('event_ids'),
+                intent: logged.get('intent'),
+                event_id: logged.get('event_id'),
+                event_ids: logged.getAll('event_ids'),
               });
             }
             try {
@@ -40,6 +83,7 @@ function seekigoAdminPublishDev() {
               );
               const result = await handleViteAdminPublish({
                 body,
+                contentType,
                 cookieHeader: req.headers.cookie ?? '',
                 origin,
                 originHeader: req.headers.origin ?? '',
@@ -57,7 +101,7 @@ function seekigoAdminPublishDev() {
             } catch (error) {
               const message =
                 error instanceof Error ? error.message : String(error);
-              const wantsJson = new URLSearchParams(body).get('ajax') === '1';
+              const wantsJson = formFields(body, contentType).get('ajax') === '1';
               if (wantsJson) {
                 res.statusCode = 500;
                 res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -65,9 +109,20 @@ function seekigoAdminPublishDev() {
                 return;
               }
               res.statusCode = 302;
+              const failParams = formFields(body, contentType);
+              const failIntent = failParams.get('intent') ?? '';
+              const failBack = failParams.get('return_to') ?? '';
+              const failEventId = failParams.get('event_id') ?? '';
+              const failPath = failIntent.startsWith('generated_image_')
+                ? (failBack.startsWith('/admin/events/')
+                    ? failBack.split('?')[0]
+                    : failEventId
+                      ? `/admin/events/${failEventId}/`
+                      : '/admin/events/reviews/image/')
+                : '/admin/events/draft/';
               res.setHeader(
                 'Location',
-                `/admin/events/draft/?error=${encodeURIComponent(message)}`,
+                `${failPath}?error=${encodeURIComponent(message)}`,
               );
               res.end();
             }

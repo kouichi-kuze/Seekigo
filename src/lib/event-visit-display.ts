@@ -10,7 +10,7 @@ import type {
 } from './event-visit-attrs'
 
 export type VisitDisplayEvent = {
-  is_free?: boolean | null
+  price_type?: string | null
   price_min?: number | null
   price_max?: number | null
   price_text?: string | null
@@ -37,30 +37,156 @@ function formatYen(amount: number): string {
   return `${amount.toLocaleString('ja-JP')}円`
 }
 
-/** 入場料。不明は null（公開側は行ごと非表示） */
+function finitePrice(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/** 入場無料だけの文は補足にしない。 */
+export function admissionSupplement(
+  priceText: string | null | undefined,
+): string | null {
+  const raw = priceText?.normalize('NFKC').trim()
+  if (!raw) return null
+  const body = raw.replace(/^料金[:：]\s*/, '')
+  const parts = body
+    .split(/(?<=[。．])/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const kept = parts.filter((part) => {
+    const compact = part.replace(/\s+/g, '')
+    return !/^(?:(?:入場|観覧|参加)(?:料(?:金)?)?(?:は|が)?)?無料[。．]?$/.test(compact)
+      && !/^入場料無料[。．]?$/.test(compact)
+  })
+  const note = kept.join('').trim()
+  return note || null
+}
+
+function structuredYenLabel(
+  min: number | null,
+  max: number | null,
+): string | null {
+  if (min != null && max != null) {
+    if (min === max) return formatYen(min)
+    return `${formatYen(min)}〜${formatYen(max)}`
+  }
+  if (min != null) return `${formatYen(min)}〜`
+  if (max != null) return `〜${formatYen(max)}`
+  return null
+}
+
+/** 単一金額の言い換えだけで、条件や別料金が残っていない。 */
+function priceTextOnlyRestatesAmount(
+  priceText: string | null | undefined,
+  amount: number,
+): boolean {
+  const compact = priceText?.normalize('NFKC').replace(/\s+/g, '') ?? ''
+  if (!compact) return true
+  const withComma = amount.toLocaleString('ja-JP')
+  const stripped = compact
+    .replace(/^料金[:：]/, '')
+    .replace(/^有料[。．]?/, '')
+    .replace(/一般・?当日料金[:：]?/, '')
+    .replace(/一般/, '')
+    .replaceAll(withComma, '')
+    .replaceAll(String(amount), '')
+    .replace(/円/g, '')
+    .replace(/[。．，、]/g, '')
+  return stripped.length === 0
+}
+
+/** 単一金額では言い切れない残り。無料だけの文は返さない。 */
+function noteBeyondSingleAmount(
+  priceText: string | null | undefined,
+  amount: number,
+): string | null {
+  if (priceTextOnlyRestatesAmount(priceText, amount)) return null
+  const raw = priceText?.normalize('NFKC').trim() ?? ''
+  const withComma = amount.toLocaleString('ja-JP')
+  const note = raw
+    .replace(/^料金[:：]\s*/, '')
+    .replace(/^有料[。．]\s*/, '')
+    .replaceAll(`${withComma}円`, '')
+    .replaceAll(`${amount}円`, '')
+    .replace(/^[。．\s]+/, '')
+    .trim()
+  return note || null
+}
+
+/** 料金区分。NULL は表示しない。 */
+export function formatPriceClassLabel(
+  priceType: string | null | undefined,
+): string | null {
+  switch (priceType) {
+    case 'free':
+      return '無料'
+    case 'partially_paid':
+      return '一部有料'
+    case 'paid':
+      return '有料'
+    case 'varies':
+      return '内容による'
+    default:
+      return null
+  }
+}
+
+/** 無料一覧・無料フィルタに入れる区分。 */
+export function isListedAsFreePrice(
+  priceType: string | null | undefined,
+): boolean {
+  return priceType === 'free' || priceType === 'partially_paid'
+}
+
+/** カードの料金チップ。有料・内容による・未設定は出さない。 */
+export function formatCardPriceChip(
+  priceType: string | null | undefined,
+  locale: 'ja' | 'en' = 'ja',
+): string | null {
+  if (priceType === 'free') return locale === 'en' ? 'Free' : '無料'
+  if (priceType === 'partially_paid') {
+    return locale === 'en' ? 'Partially paid' : '一部有料'
+  }
+  return null
+}
+
+/** 詳細の料金区分。具体的な金額は formatAdmissionNote。 */
 export function formatAdmissionLabel(event: VisitDisplayEvent): string | null {
-  if (event.is_free === true) return '無料'
+  return formatPriceClassLabel(event.price_type)
+}
 
-  if (event.is_free === false) {
-    const min =
-      typeof event.price_min === 'number' && Number.isFinite(event.price_min)
-        ? event.price_min
-        : null
-    const max =
-      typeof event.price_max === 'number' && Number.isFinite(event.price_max)
-        ? event.price_max
-        : null
+/** 区分と別に出す料金の具体。未設定でも price_text は出す。 */
+export function formatAdmissionNote(event: VisitDisplayEvent): string | null {
+  const text = event.price_text?.trim() || null
+  if (event.price_type === 'free') return admissionSupplement(text)
 
-    if (min != null && max != null) {
-      if (min === max) return formatYen(min)
-      return `${formatYen(min)}〜${formatYen(max)}`
+  if (text) return text
+
+  if (event.price_type !== 'paid') return null
+  const min = finitePrice(event.price_min)
+  const max = finitePrice(event.price_max)
+  return structuredYenLabel(min, max)
+}
+
+/**
+ * カードの料金1行。無料チップと重複する「無料」は出さない。
+ * 単一・範囲の金額はそれを優先し、条件付きの文章は消さない。
+ */
+export function formatCardPriceLine(event: VisitDisplayEvent): string | null {
+  const text = event.price_text?.trim() || null
+  if (event.price_type === 'free') return admissionSupplement(text)
+
+  if (event.price_type === 'paid') {
+    const min = finitePrice(event.price_min)
+    const max = finitePrice(event.price_max)
+    const structured = structuredYenLabel(min, max)
+    if (structured && min != null && max != null && min === max) {
+      const note = noteBeyondSingleAmount(text, min)
+      return note ? `${structured} ${note}` : structured
     }
-    if (min != null) return `${formatYen(min)}〜`
-    if (max != null) return `〜${formatYen(max)}`
+    if (structured && !text) return structured
   }
 
-  const text = event.price_text?.trim()
-  return text || null
+  return text
 }
 
 const RESERVATION_PUBLIC: Partial<Record<ReservationStatus, string>> = {
@@ -178,8 +304,9 @@ export function buildVisitChecklistTags(
     tags.push({ id: 'reservation', label: '予約不要' })
   }
 
-  if (event.is_free === true) {
-    tags.push({ id: 'free', label: '無料' })
+  const priceClass = formatPriceClassLabel(event.price_type)
+  if (priceClass) {
+    tags.push({ id: 'price', label: priceClass })
   }
 
   if (
