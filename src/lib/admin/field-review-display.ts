@@ -66,6 +66,7 @@ export function fieldReviewStatusLabel(status: string): string {
 export function fieldReviewFieldLabel(fieldName: string): string {
   if (fieldName === 'is_kids') return '子ども向け'
   if (fieldName === 'is_indoor') return '屋内'
+  if (fieldName === 'is_night') return '夜向け'
   if (fieldName === 'price_type') return '料金区分'
   return fieldName
 }

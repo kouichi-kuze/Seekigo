@@ -36,6 +36,7 @@ export const REVIEWABLE_FIELD_NAMES = [
   'price_type',
   'is_kids',
   'is_indoor',
+  'is_night',
   'price_min',
   'price_max',
   'category',
@@ -88,6 +89,7 @@ export type FieldSnapshot = {
     price_type?: PriceType | null
     is_kids?: boolean | null
     is_indoor?: boolean | null
+    is_night?: boolean | null
   price_min?: number | null
   price_max?: number | null
   category?: string[] | null
@@ -230,6 +232,7 @@ export function normalizeFieldForCompare(
       return normalizeWhitespaceText(value)
     case 'is_kids':
     case 'is_indoor':
+    case 'is_night':
       if (value === true || value === false) return value
       return null
     case 'price_type':
@@ -294,6 +297,7 @@ export function normalizeFieldForStorage(
       return normalizeWhitespaceText(value)
     case 'is_kids':
     case 'is_indoor':
+    case 'is_night':
       if (value === true || value === false) return value
       return null
     case 'price_type':
