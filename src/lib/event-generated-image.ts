@@ -16,6 +16,7 @@ export const GENERATED_IMAGE_STATUSES = [
   'pending',
   'approved',
   'rejected',
+  'blocked',
 ] as const
 
 export type GeneratedImageStatus = (typeof GENERATED_IMAGE_STATUSES)[number]
@@ -160,6 +161,33 @@ async function markGeneratedImagePending(
   return { ok: true, url }
 }
 
+/** 通信失敗や rate limit は含めない。安全ポリシーで拒否されたときだけ。 */
+export function isSafetyPolicyRejection(message: string): boolean {
+  return /safety[_\s-]?system|safety[_\s-]?violations|content[_\s-]?policy|moderation_blocked/i.test(
+    message,
+  )
+}
+
+async function markGeneratedImageBlocked(
+  client: SupabaseClient,
+  eventId: number,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { error } = await client
+    .from('events')
+    .update({
+      generated_image_status: 'blocked',
+      generated_image_url: null,
+      generated_image_source: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', eventId)
+  if (error) {
+    console.error(LOG, error.message)
+    return { ok: false, message: error.message }
+  }
+  return { ok: true }
+}
+
 /**
  * イベント専用イメージを1件生成する。
  * 標準生成、追加指示、将来の一括生成はすべてこの関数を呼ぶ。
@@ -203,6 +231,10 @@ export async function generateEventImage(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(LOG, message)
+    if (isSafetyPolicyRejection(message)) {
+      const blocked = await markGeneratedImageBlocked(client, event.id)
+      if (!blocked.ok) return blocked
+    }
     return { ok: false, message }
   }
   if (!b64) {

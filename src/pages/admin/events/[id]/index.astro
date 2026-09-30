@@ -758,6 +758,7 @@ const publicEnHref =
                 {generatedImageNote && <p class="hint">{generatedImageNote}</p>}
                 <p class="hint">
                   status: {generatedImageStatus}
+                  {generatedImageStatus === 'blocked' ? '（安全ポリシーにより未生成。自動では再試行しません）' : ''}
                   {generatedImageSource === 'openai' ? ' · 生成方法: OpenAI' : ''}
                   {generatedImageSource === 'upload' ? ' · 生成方法: アップロード' : ''}
                   {generatedImageUrl ? ` · ${generatedImageUrl}` : ''}

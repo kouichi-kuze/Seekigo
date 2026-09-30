@@ -56,13 +56,15 @@ export function isActiveSchedule(status: ScheduleStatus | null): boolean {
 export function bulkImageExclusionReasons(
   event: BulkImageEvent,
   scheduleStatus: ScheduleStatus | null,
+  options?: { allowBlocked?: boolean },
 ): BulkImageExclusion[] {
   const reasons: BulkImageExclusion[] = []
   if (event.status !== 'published' || !isActiveSchedule(scheduleStatus)) {
     reasons.push('not_active')
   }
   const generatedStatus = event.generated_image_status?.trim() || 'none'
-  if (generatedStatus !== 'none') reasons.push('generated_status')
+  const blockedRetry = options?.allowBlocked === true && generatedStatus === 'blocked'
+  if (generatedStatus !== 'none' && !blockedRetry) reasons.push('generated_status')
   if (filled(event.generated_image_url)) reasons.push('generated_url')
   if (filled(event.generated_image_source)) reasons.push('generated_source')
   if (filled(event.generated_image_instruction)) reasons.push('generated_instruction')
@@ -80,6 +82,7 @@ export function bulkImageExclusionReasons(
 export function isBulkImageCandidate(
   event: BulkImageEvent,
   scheduleStatus: ScheduleStatus | null,
+  options?: { allowBlocked?: boolean },
 ): boolean {
-  return bulkImageExclusionReasons(event, scheduleStatus).length === 0
+  return bulkImageExclusionReasons(event, scheduleStatus, options).length === 0
 }

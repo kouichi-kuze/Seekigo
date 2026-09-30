@@ -4,9 +4,11 @@
  * npm run generate:event-images -- --dry-run --limit=10
  * npm run generate:event-images -- --limit=10
  * npm run generate:event-images -- --event-id=123
+ * npm run generate:event-images -- --event-id=92 --retry-blocked --dry-run
  *
  * --limit の初期値は 5。省略しても全件は生成しない。
- * --event-id を指定しても対象条件は外さない。
+ * --event-id を指定しても対象条件は外さない。blocked の再試行は --retry-blocked と併用する。
+ * --retry-blocked だけでは実行しない。
  * --dry-run は API・DB・ファイルを変更しない。
  */
 import { config } from 'dotenv'
@@ -37,15 +39,21 @@ type Args = {
   dryRun: boolean
   limit: number
   eventId: number | null
+  retryBlocked: boolean
 }
 
 function parseArgs(argv: string[]): Args {
   let dryRun = false
   let limit = DEFAULT_LIMIT
   let eventId: number | null = null
+  let retryBlocked = false
   for (const arg of argv) {
     if (arg === '--dry-run') {
       dryRun = true
+      continue
+    }
+    if (arg === '--retry-blocked') {
+      retryBlocked = true
       continue
     }
     if (arg.startsWith('--limit=')) {
@@ -58,13 +66,16 @@ function parseArgs(argv: string[]): Args {
     }
     throw new Error(`不明な引数です: ${arg}`)
   }
+  if (retryBlocked && eventId == null) {
+    throw new Error('--retry-blocked は --event-id と併用してください')
+  }
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error('--limit は 1 以上の整数にしてください')
   }
   if (eventId != null && (!Number.isInteger(eventId) || eventId < 1)) {
     throw new Error('--event-id は 1 以上の整数にしてください')
   }
-  return { dryRun, limit, eventId }
+  return { dryRun, limit, eventId, retryBlocked }
 }
 
 function createService(): SupabaseClient {
@@ -186,9 +197,20 @@ async function main() {
   console.log(`${LOG} 開催中・今後開催: ${activeCount}`)
   console.log(`${LOG} 終了または開催日なし: ${inactiveCount}`)
 
+  const allowBlocked = args.retryBlocked && args.eventId != null
+  const retryTarget = allowBlocked
+    ? events.filter((event) => {
+        if (event.id !== args.eventId) return false
+        return isBulkImageCandidate(event, scheduleOf(event, occurrences), {
+          allowBlocked: true,
+        })
+      })
+    : []
   const pool = args.eventId == null
     ? eligible
-    : eligible.filter((event) => event.id === args.eventId)
+    : allowBlocked
+      ? retryTarget
+      : eligible.filter((event) => event.id === args.eventId)
   const selected = args.eventId == null ? pool.slice(0, args.limit) : pool
 
   printPlan(eligible, selected, excludedReasons, excludedEvents)
@@ -196,7 +218,9 @@ async function main() {
   if (args.eventId != null && selected.length === 0) {
     const found = events.find((event) => event.id === args.eventId)
     const reasons = found
-      ? bulkImageExclusionReasons(found, scheduleOf(found, occurrences))
+      ? bulkImageExclusionReasons(found, scheduleOf(found, occurrences), {
+          allowBlocked,
+        })
       : []
     console.log(`${LOG} スキップ: ${args.eventId} は対象条件を満たしません`)
     for (const reason of reasons) {
@@ -225,8 +249,16 @@ async function main() {
       continue
     }
     const occurrencesNow = await loadOccurrences(client, [current.id])
-    const reasons = bulkImageExclusionReasons(current, scheduleOf(current, occurrencesNow))
-    if (!isBulkImageCandidate(current, scheduleOf(current, occurrencesNow))) {
+    const reasons = bulkImageExclusionReasons(
+      current,
+      scheduleOf(current, occurrencesNow),
+      { allowBlocked: allowBlocked && current.id === args.eventId },
+    )
+    if (
+      !isBulkImageCandidate(current, scheduleOf(current, occurrencesNow), {
+        allowBlocked: allowBlocked && current.id === args.eventId,
+      })
+    ) {
       skipped.push({ id: current.id, reasons })
       console.log(`${LOG} スキップ ${current.id}: ${reasons.map((reason) => BULK_IMAGE_EXCLUSION_LABELS[reason]).join(', ')}`)
       continue
