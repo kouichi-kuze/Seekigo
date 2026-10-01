@@ -5,8 +5,12 @@
  * npm run generate:event-images -- --limit=10
  * npm run generate:event-images -- --event-id=123
  * npm run generate:event-images -- --event-id=92 --retry-blocked --dry-run
+ * npm run generate:event-images -- --dry-run --allow-draft --walkerplus-batch=1 --limit=87
  *
  * --limit の初期値は 5。省略しても全件は生成しない。
+ * 通常は published かつ開催中・今後開催だけ。draft は自動では探さない。
+ * draft は --allow-draft と --event-id または --walkerplus-batch=1 を両方指定したときだけ見る。
+ * --allow-draft だけでは実行しない。終了した draft、権利確認済み公式画像、既存の生成状態は対象にしない。
  * --event-id を指定しても対象条件は外さない。blocked の再試行は --retry-blocked と併用する。
  * --retry-blocked だけでは実行しない。
  * --dry-run は API・DB・ファイルを変更しない。
@@ -29,6 +33,7 @@ import {
   type OccurrenceDateRow,
   type ScheduleStatus,
 } from '../src/lib/event-schedule'
+import { WALKERPLUS_BATCH1_SOURCE_IDS } from './data/walkerplus-batch1-ids'
 
 config()
 
@@ -40,6 +45,8 @@ type Args = {
   limit: number
   eventId: number | null
   retryBlocked: boolean
+  allowDraft: boolean
+  walkerplusBatch: 1 | null
 }
 
 function parseArgs(argv: string[]): Args {
@@ -47,6 +54,8 @@ function parseArgs(argv: string[]): Args {
   let limit = DEFAULT_LIMIT
   let eventId: number | null = null
   let retryBlocked = false
+  let allowDraft = false
+  let walkerplusBatch: 1 | null = null
   for (const arg of argv) {
     if (arg === '--dry-run') {
       dryRun = true
@@ -54,6 +63,16 @@ function parseArgs(argv: string[]): Args {
     }
     if (arg === '--retry-blocked') {
       retryBlocked = true
+      continue
+    }
+    if (arg === '--allow-draft') {
+      allowDraft = true
+      continue
+    }
+    if (arg.startsWith('--walkerplus-batch=')) {
+      const batch = Number(arg.slice('--walkerplus-batch='.length))
+      if (batch !== 1) throw new Error('--walkerplus-batch は 1 だけ指定できます')
+      walkerplusBatch = 1
       continue
     }
     if (arg.startsWith('--limit=')) {
@@ -69,13 +88,19 @@ function parseArgs(argv: string[]): Args {
   if (retryBlocked && eventId == null) {
     throw new Error('--retry-blocked は --event-id と併用してください')
   }
+  if (allowDraft && eventId == null && walkerplusBatch == null) {
+    throw new Error('--allow-draft は --event-id または --walkerplus-batch=1 と併用してください')
+  }
+  if (walkerplusBatch === 1 && !allowDraft) {
+    throw new Error('--walkerplus-batch=1 は --allow-draft と併用してください')
+  }
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error('--limit は 1 以上の整数にしてください')
   }
   if (eventId != null && (!Number.isInteger(eventId) || eventId < 1)) {
     throw new Error('--event-id は 1 以上の整数にしてください')
   }
-  return { dryRun, limit, eventId, retryBlocked }
+  return { dryRun, limit, eventId, retryBlocked, allowDraft, walkerplusBatch }
 }
 
 function createService(): SupabaseClient {
@@ -85,6 +110,37 @@ function createService(): SupabaseClient {
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+}
+
+async function loadByIds(
+  client: SupabaseClient,
+  eventIds: number[],
+): Promise<BulkImageEvent[]> {
+  if (eventIds.length === 0) return []
+  const { data, error } = await client
+    .from('events')
+    .select(BULK_IMAGE_EVENT_SELECT)
+    .in('id', eventIds)
+    .order('id')
+  if (error) throw new Error(error.message)
+  return (data ?? []) as BulkImageEvent[]
+}
+
+async function loadWalkerplusBatch1(client: SupabaseClient): Promise<BulkImageEvent[]> {
+  const sourceIds = [...WALKERPLUS_BATCH1_SOURCE_IDS]
+  const { data: sources, error } = await client
+    .from('event_sources')
+    .select('event_id, source_event_id')
+    .eq('source_name', 'walkerplus')
+    .in('source_event_id', sourceIds)
+  if (error) throw new Error(error.message)
+  const ids = [...new Set((sources ?? []).map((row) => Number(row.event_id)))]
+  if (ids.length !== sourceIds.length || (sources ?? []).length !== sourceIds.length) {
+    throw new Error(
+      `Walkerplus第1バッチは ${sourceIds.length} 件だけです。見つかったイベントは ${ids.length} 件です`,
+    )
+  }
+  return loadByIds(client, ids)
 }
 
 async function loadPublished(client: SupabaseClient): Promise<BulkImageEvent[]> {
@@ -165,7 +221,12 @@ function printPlan(
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const client = createService()
-  const events = await loadPublished(client)
+  const eligibility = { allowDraft: args.allowDraft }
+  const events = args.walkerplusBatch === 1
+    ? await loadWalkerplusBatch1(client)
+    : args.allowDraft && args.eventId != null
+      ? await loadByIds(client, [args.eventId])
+      : await loadPublished(client)
   const occurrences = await loadOccurrences(
     client,
     events.map((event) => event.id),
@@ -178,7 +239,7 @@ async function main() {
   let inactiveCount = 0
   for (const event of events) {
     const schedule = scheduleOf(event, occurrences)
-    const reasons = bulkImageExclusionReasons(event, schedule)
+    const reasons = bulkImageExclusionReasons(event, schedule, eligibility)
     if (reasons.length === 0) {
       eligible.push(event)
       activeCount += 1
@@ -203,6 +264,7 @@ async function main() {
         if (event.id !== args.eventId) return false
         return isBulkImageCandidate(event, scheduleOf(event, occurrences), {
           allowBlocked: true,
+          allowDraft: args.allowDraft,
         })
       })
     : []
@@ -220,13 +282,20 @@ async function main() {
     const reasons = found
       ? bulkImageExclusionReasons(found, scheduleOf(found, occurrences), {
           allowBlocked,
+          allowDraft: args.allowDraft,
         })
       : []
     console.log(`${LOG} スキップ: ${args.eventId} は対象条件を満たしません`)
     for (const reason of reasons) {
       console.log(`  ${BULK_IMAGE_EXCLUSION_LABELS[reason]}`)
     }
-    if (!found) console.log('  published のイベントが見つかりません')
+    if (!found) {
+      console.log(
+        args.allowDraft
+          ? '  指定したイベントが見つかりません'
+          : '  published のイベントが見つかりません',
+      )
+    }
     console.log(`${LOG} 成功 0 / 失敗 0 / スキップ 1`)
     console.log(`${LOG} スキップ ID: ${args.eventId}`)
     return
@@ -252,11 +321,12 @@ async function main() {
     const reasons = bulkImageExclusionReasons(
       current,
       scheduleOf(current, occurrencesNow),
-      { allowBlocked: allowBlocked && current.id === args.eventId },
+      { allowBlocked: allowBlocked && current.id === args.eventId, allowDraft: args.allowDraft },
     )
     if (
       !isBulkImageCandidate(current, scheduleOf(current, occurrencesNow), {
         allowBlocked: allowBlocked && current.id === args.eventId,
+        allowDraft: args.allowDraft,
       })
     ) {
       skipped.push({ id: current.id, reasons })

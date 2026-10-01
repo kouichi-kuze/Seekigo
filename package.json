@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "test": "tsx --test scripts/price-type-rules.test.ts scripts/walkerplus-limit.test.ts scripts/walkerplus-sessions.test.ts scripts/municipality-rules.test.ts scripts/event-image-eligibility.test.ts scripts/event-image-prompt-safety.test.ts scripts/admin-external-link.test.ts",
     "preview": "astro preview",
     "astro": "astro",
     "fetch:gotokyo": "tsx scripts/fetch-gotokyo.ts",
@@ -25,6 +26,7 @@
     "dedupe:enjoytokyo": "tsx scripts/check-event-duplicates.ts",
     "import:enjoytokyo": "tsx scripts/import-enjoytokyo-supabase.ts",
     "import:walkerplus": "tsx scripts/import-walkerplus-supabase.ts",
+    "import:walkerplus:batch1": "tsx scripts/import-walkerplus-batch1.ts",
     "collect:reaction-web": "tsx scripts/collect-reaction-web.ts",
     "collect:reaction-x": "tsx scripts/collect-reaction-x.ts",
     "summarize:reaction": "tsx scripts/summarize-reaction.ts",

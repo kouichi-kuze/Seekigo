@@ -23,20 +23,14 @@ import {
   type CategoryBucket,
   type WalkerplusEventDetail,
 } from './lib/walkerplus-detail-extract'
-import { randomGapMs, sleep, WALKERPLUS_PHASE_MAX_ITEMS } from './lib/walkerplus-parse'
+import { randomGapMs, resolveWalkerplusMaxItems, sleep } from './lib/walkerplus-parse'
 
 config()
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
-const MAX_ITEMS = Math.min(
-  Number.parseInt(
-    process.env.WALKERPLUS_MAX_ITEMS ?? String(WALKERPLUS_PHASE_MAX_ITEMS),
-    10,
-  ) || WALKERPLUS_PHASE_MAX_ITEMS,
-  WALKERPLUS_PHASE_MAX_ITEMS,
-)
+const MAX_ITEMS = resolveWalkerplusMaxItems(process.env.WALKERPLUS_MAX_ITEMS)
 const GAP_MIN_MS = 2000
 const GAP_MAX_MS = 3000
 

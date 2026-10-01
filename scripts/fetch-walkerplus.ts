@@ -16,7 +16,8 @@ import {
   randomGapMs,
   sleep,
   toAbsoluteUrl,
-  WALKERPLUS_PHASE_MAX_ITEMS,
+  resolveWalkerplusMaxItems,
+  resolveWalkerplusMaxListPages,
   type WalkerplusListEvent,
 } from './lib/walkerplus-parse'
 
@@ -28,16 +29,10 @@ const USER_AGENT =
 const DEFAULT_LIST_URL = 'https://www.walkerplus.com/event_list/ar0313/'
 const SITE_ORIGIN = 'https://www.walkerplus.com'
 
-const MAX_ITEMS = Math.min(
-  Number.parseInt(
-    process.env.WALKERPLUS_MAX_ITEMS ?? String(WALKERPLUS_PHASE_MAX_ITEMS),
-    10,
-  ) || WALKERPLUS_PHASE_MAX_ITEMS,
-  WALKERPLUS_PHASE_MAX_ITEMS,
-)
-const MAX_LIST_PAGES = Math.min(
-  Number.parseInt(process.env.WALKERPLUS_MAX_LIST_PAGES ?? '5', 10) || 5,
-  10,
+const MAX_ITEMS = resolveWalkerplusMaxItems(process.env.WALKERPLUS_MAX_ITEMS)
+const MAX_LIST_PAGES = resolveWalkerplusMaxListPages(
+  MAX_ITEMS,
+  process.env.WALKERPLUS_MAX_LIST_PAGES,
 )
 const GAP_MIN_MS = 2000
 const GAP_MAX_MS = 3000

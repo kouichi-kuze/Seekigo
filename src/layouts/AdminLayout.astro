@@ -67,6 +67,7 @@ const pathname = Astro.url.pathname
     display: grid;
     grid-template-columns: 240px 1fr;
     min-height: 100vh;
+    align-items: start;
   }
 
   .admin-main-wrap {
@@ -82,9 +83,70 @@ const pathname = Astro.url.pathname
     padding: 0.65rem 1rem;
     background: #fff;
     border-bottom: 1px solid #d8dee8;
+  }
+
+  .admin-sidebar {
     position: sticky;
     top: 0;
-    z-index: 20;
+    height: 100vh;
+    overflow-y: auto;
+    align-self: start;
+    box-sizing: border-box;
+  }
+
+  .admin-btn {
+    appearance: none;
+    display: inline-block;
+    border-radius: 8px;
+    padding: 0.55rem 0.9rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    cursor: pointer;
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    text-decoration: none;
+  }
+
+  .admin-btn:hover {
+    background: #f8fafc;
+  }
+
+  .admin-upload-form {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .admin-upload-form label {
+    margin-bottom: 0;
+  }
+
+  .admin-ext-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.4rem 0 0.85rem;
+  }
+
+  .admin-ext-link {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+    color: #0f172a;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+  }
+
+  .admin-ext-link:hover {
+    background: #f8fafc;
   }
 
   .admin-menu-toggle {

@@ -21,14 +21,22 @@ export function formatAreaLabel(area: string | null | undefined): string | null 
 
 /** AREA_LABELS に無い、既存の自治体スラッグ。機械翻訳ではなくスラッグの表示名。 */
 const MUNICIPALITY_PLACE_LABELS: Record<string, string> = {
+  adachi: '足立区',
   bunkyo: '文京区',
   chiyoda: '千代田区',
+  chofu: '調布市',
+  edogawa: '江戸川区',
   fuchu: '府中市',
+  hachioji: '八王子市',
+  itabashi: '板橋区',
+  katsushika: '葛飾区',
   kita: '北区',
   kodaira: '小平市',
   koganei: '小金井市',
   koto: '江東区',
+  mitaka: '三鷹市',
   musashino: '武蔵野市',
+  nakano: '中野区',
   nerima: '練馬区',
   ota: '大田区',
   setagaya: '世田谷区',

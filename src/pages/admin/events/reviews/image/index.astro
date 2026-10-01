@@ -151,7 +151,7 @@ function generatedPreviewSrc(
             <input type="hidden" name="intent" value="generated_image_regenerate" />
             <input type="hidden" name="event_id" value={String(event.id)} />
             <input type="hidden" name="return_to" value="/admin/events/reviews/image/" />
-            <button type="submit">標準設定で再生成</button>
+            <button type="submit" class="admin-btn">標準設定で再生成</button>
           </form>
           <form method="POST" action="/admin/events/">
             <input type="hidden" name="csrf_token" value={csrfToken} />
@@ -167,9 +167,9 @@ function generatedPreviewSrc(
                 placeholder="例：人物なし。複数種類のカレーを見せる。明るく上質な写真調。"
               ></textarea>
             </label>
-            <button type="submit">追加指示で再生成</button>
+            <button type="submit" class="admin-btn">追加指示で再生成</button>
           </form>
-          <form method="POST" action="/admin/events/" enctype="multipart/form-data">
+          <form class="admin-upload-form" method="POST" action="/admin/events/" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value={csrfToken} />
             <input type="hidden" name="intent" value="generated_image_upload" />
             <input type="hidden" name="event_id" value={String(event.id)} />
@@ -183,7 +183,7 @@ function generatedPreviewSrc(
                 required
               />
             </label>
-            <button type="submit">画像をアップロード</button>
+            <button type="submit" class="admin-btn">画像をアップロード</button>
           </form>
         </article>
       ))

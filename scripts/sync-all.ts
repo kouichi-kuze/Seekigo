@@ -105,6 +105,10 @@ async function main() {
     // 個別指定があればそれを優先
     ENJOYTOKYO_DETAILS_LIMIT:
       process.env.ENJOYTOKYO_DETAILS_LIMIT?.trim() || '10',
+
+    // Walkerplus の通常同期は50件。100件は WALKERPLUS_MAX_ITEMS を付けた手動取得だけ。
+    WALKERPLUS_MAX_ITEMS: '50',
+    WALKERPLUS_MAX_LIST_PAGES: '5',
   }
 
   let failedSources = 0

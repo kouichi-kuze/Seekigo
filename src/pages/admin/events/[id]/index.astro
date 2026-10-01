@@ -17,6 +17,7 @@ import {
   VENUE_TYPE_LABELS,
 } from '../../../../lib/admin/field-labels'
 import { IMAGE_USAGE_STATUSES } from '../../../../lib/event-image-usage'
+import { safeHttpUrl, sourcePageLabel } from '../../../../lib/admin/external-link'
 import { isBodyProtectedFromSync } from '../../../../lib/event-status'
 import {
   FRIENDLY_VALUES,
@@ -74,6 +75,7 @@ let eventTranslation: EventTranslationRow | null = null
 let reactionTranslation: ReactionSummaryTranslationRow | null = null
 let translationLoadNote: string | null = null
 let eventSourceCount = 0
+let eventSourcePages: Array<{ source_name: string | null; source_url: string | null }> = []
 let generatedImageUrl: string | null = null
 let generatedImageStatus = 'none'
 let generatedImageSource: string | null = null
@@ -137,11 +139,17 @@ try {
       eventId,
     })
 
-    const { count: srcCount } = await admin
+    const { count: srcCount, data: sourcePages, error: sourcePagesError } = await admin
       .from('event_sources')
-      .select('*', { count: 'exact', head: true })
+      .select('source_name, source_url', { count: 'exact' })
       .eq('event_id', eventId)
     eventSourceCount = srcCount ?? 0
+    if (!sourcePagesError) {
+      eventSourcePages = (sourcePages ?? []) as Array<{
+        source_name: string | null
+        source_url: string | null
+      }>
+    }
 
     const generatedSelect =
       'generated_image_url, generated_image_status, generated_image_source, generated_image_instruction, updated_at'
@@ -728,6 +736,54 @@ const publicEnHref =
               <AdminFieldLabel field="official_url" />
               <input type="url" name="official_url" value={event.official_url ?? ''} />
             </label>
+            {
+              (() => {
+                const officialHref = safeHttpUrl(event.official_url)
+                const seen = new Set<string>()
+                const sourceLinks: Array<{ href: string; label: string }> = []
+                const addSource = (raw: string | null | undefined, name: string | null) => {
+                  const href = safeHttpUrl(raw)
+                  if (!href || seen.has(href)) return
+                  seen.add(href)
+                  const sourceName = sourcePageLabel(name)
+                  sourceLinks.push({
+                    href,
+                    label: name?.trim()
+                      ? `取得元ページを開く（${sourceName}）`
+                      : '取得元ページを開く',
+                  })
+                }
+                for (const source of eventSourcePages) {
+                  addSource(source.source_url, source.source_name)
+                }
+                addSource(event.source_url, null)
+                if (!officialHref && sourceLinks.length === 0) return null
+                return (
+                  <div class="admin-ext-links">
+                    {officialHref && (
+                      <a
+                        class="admin-ext-link"
+                        href={officialHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        公式ページを開く ↗
+                      </a>
+                    )}
+                    {sourceLinks.map((link) => (
+                      <a
+                        class="admin-ext-link"
+                        href={link.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {link.label} ↗
+                      </a>
+                    ))}
+                  </div>
+                )
+              })()
+            }
             <label>
               <AdminFieldLabel field="summary" />
               <textarea name="summary" rows="8">{event.summary ?? ''}</textarea>
@@ -788,7 +844,7 @@ const publicEnHref =
                   />
                   <input type="hidden" name="event_id" value={String(event.id)} />
                   <input type="hidden" name="return_to" value={`/admin/events/${event.id}/`} />
-                  <button type="submit" class="btn" form="concept-image-form">
+                  <button type="submit" class="btn admin-btn" form="concept-image-form">
                     {generatedImageStatus === 'none'
                       ? '標準設定でイメージ画像を生成'
                       : '標準設定で再生成'}
@@ -808,11 +864,11 @@ const publicEnHref =
                       placeholder="例：人物なし。複数種類のカレーを見せる。明るく上質な写真調。"
                     ></textarea>
                   </label>
-                  <button type="submit" class="btn">
+                  <button type="submit" class="btn admin-btn">
                     {generatedImageStatus === 'none' ? '追加指示で生成' : '追加指示で再生成'}
                   </button>
                 </form>
-                <form method="post" action="/admin/events/" enctype="multipart/form-data">
+                <form class="admin-upload-form" method="post" action="/admin/events/" enctype="multipart/form-data">
                   <input type="hidden" name="csrf_token" value={csrfToken} />
                   <input type="hidden" name="intent" value="generated_image_upload" />
                   <input type="hidden" name="event_id" value={String(event.id)} />
@@ -826,7 +882,7 @@ const publicEnHref =
                       required
                     />
                   </label>
-                  <button type="submit" class="btn">画像をアップロード</button>
+                  <button type="submit" class="btn admin-btn">画像をアップロード</button>
                 </form>
                 <p class="hint">
                   1回の操作で1枚です。標準・追加指示・アップロードのあと、採用は Image Reviews です。
@@ -1483,6 +1539,11 @@ const publicEnHref =
     cursor: pointer;
     border: 1px solid transparent;
     line-height: 1.2;
+  }
+  .btn.admin-btn {
+    background: #fff;
+    color: #0f172a;
+    border-color: #cbd5e1;
   }
   .btn--primary {
     background: #0f766e;

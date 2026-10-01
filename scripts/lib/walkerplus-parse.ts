@@ -2,7 +2,42 @@
  * Walkerplus Phase 0 — 日付・ID パース（調査用のみ）
  */
 
-export const WALKERPLUS_PHASE_MAX_ITEMS = 50
+/** 環境変数未指定時の取得件数。sync-all もこの件数。 */
+export const WALKERPLUS_DEFAULT_MAX_ITEMS = 50
+/** WALKERPLUS_MAX_ITEMS で指定できる上限。 */
+export const WALKERPLUS_HARD_MAX_ITEMS = 100
+/** 一覧1ページあたりの件数。ページ数の見積もりにだけ使う。 */
+export const WALKERPLUS_LIST_PAGE_SIZE = 10
+/** 100件までのときに、1ページの抽出が少なくても件数上限まで進めるページ数。 */
+export const WALKERPLUS_HARD_MAX_LIST_PAGES = 15
+
+/** 以前の定数名。既定件数（ハード上限ではない）。 */
+export const WALKERPLUS_PHASE_MAX_ITEMS = WALKERPLUS_DEFAULT_MAX_ITEMS
+
+export function resolveWalkerplusMaxItems(raw?: string | null): number {
+  const trimmed = raw?.trim() ?? ''
+  if (!trimmed) return WALKERPLUS_DEFAULT_MAX_ITEMS
+  const n = Number.parseInt(trimmed, 10)
+  if (!Number.isFinite(n) || n < 1) return WALKERPLUS_DEFAULT_MAX_ITEMS
+  return Math.min(Math.floor(n), WALKERPLUS_HARD_MAX_ITEMS)
+}
+
+export function resolveWalkerplusMaxListPages(
+  maxItems: number,
+  raw?: string | null,
+): number {
+  const pagesToFill = Math.max(
+    1,
+    Math.ceil(maxItems / WALKERPLUS_LIST_PAGE_SIZE),
+  )
+  const slack = maxItems > WALKERPLUS_DEFAULT_MAX_ITEMS ? 5 : 0
+  const auto = Math.min(pagesToFill + slack, WALKERPLUS_HARD_MAX_LIST_PAGES)
+  const trimmed = raw?.trim() ?? ''
+  if (!trimmed) return auto
+  const n = Number.parseInt(trimmed, 10)
+  if (!Number.isFinite(n) || n < 1) return auto
+  return Math.min(Math.floor(n), WALKERPLUS_HARD_MAX_LIST_PAGES)
+}
 
 export type WalkerplusListEvent = {
   source_name: 'walkerplus'

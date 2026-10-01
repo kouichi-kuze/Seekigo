@@ -61,24 +61,105 @@ function minimalSummary(summary: string | null): string | null {
   return (stop > 80 ? cut.slice(0, stop + 1) : cut).trim()
 }
 
+const SENSITIVE_THEMES: Array<{ re: RegExp; title: string; context: string }> = [
+  {
+    re: /ハイキュー|古舘/,
+    title: 'a high-school volleyball art exhibition',
+    context:
+      'A gallery of original drawings about athletic effort and teamwork in high-school volleyball. No manga characters, team uniforms from a known series, or title lettering.',
+  },
+  {
+    re: /竜とそばかす|アニマーシブ|没入型ライブ/,
+    title: 'an immersive live music and stage performance',
+    context:
+      'Stage light, unidentifiable performers, and the feeling of a musical show. No specific film, character, or story world.',
+  },
+  {
+    re: /バイオハザード|BIOHAZARD|カプコン/i,
+    title: 'a video-game culture exhibition',
+    context:
+      'A dim gallery of original props and a tense atmosphere. No game characters, creatures, logos, or title lettering.',
+  },
+  {
+    re: /コスプレ|マンガ・アニメ/,
+    title: 'a neighborhood halloween costume festival',
+    context:
+      'Festive night colors, original generic costumes, and people photographing a crowd. No manga, anime, or game characters.',
+  },
+  {
+    re: /キッザニア|KidZania/i,
+    title: "a children's role-play activity center",
+    context:
+      'Bright indoor rooms where children try everyday jobs. No logos, mascots, or branded interiors.',
+  },
+  {
+    re: /ウエンツ|瑛士/,
+    title: 'a gentle halloween classical concert',
+    context:
+      'Orchestra instruments and a playful spooky mood. No portrait of a real performer.',
+  },
+  {
+    re: /ディズニー|アナと雪の女王|Let It Go/i,
+    title: 'an evening classical concert for families',
+    context:
+      'Orchestra instruments and a warm concert-hall atmosphere. No film characters or logos.',
+  },
+  {
+    re: /スヌーピー|ピーナッツ|Siblings are Wonderful/i,
+    title: 'an exhibition about brothers, sisters, and family warmth',
+    context:
+      'Drawings and a quiet gallery atmosphere about sibling relationships. No cartoon characters or comic strips.',
+  },
+  {
+    re: /深夜食堂|かもめ食堂/,
+    title: 'an exhibition about neighborhood diners and shared meals',
+    context:
+      'Tables, simple home-style dishes, and a small dining room. No film stills, actors, or title lettering.',
+  },
+  {
+    re: /niko and|UNI9UE/i,
+    title: 'an outdoor stroll with food, walking, and live music',
+    context:
+      'A gathering that is neither a typical concert nor a typical market. No clothing brand, logo, or shop interior.',
+  },
+]
+
+function sensitiveTheme(event: ConceptImageEvent, customInstruction: string | null): {
+  title: string
+  context: string
+} | null {
+  const corpus = [event.title, event.summary, customInstruction].filter(Boolean).join('\n')
+  if (!corpus.trim()) return null
+  for (const theme of SENSITIVE_THEMES) {
+    if (theme.re.test(corpus)) return { title: theme.title, context: theme.context }
+  }
+  return null
+}
+
 /** 追加指示が無いときは標準プロンプトだけを返す。 */
 export function buildConceptImagePrompt(
   event: ConceptImageEvent,
   customInstruction?: string | null,
 ): string {
+  const extra = customInstruction?.replace(/\0/g, '').trim() || null
+  const sensitive = sensitiveTheme(event, extra)
   const categories = categoriesOf(event.category)
-  const summary = minimalSummary(event.summary)
+  const summary = sensitive ? null : minimalSummary(event.summary)
   const lines = [
     RULES,
-    `Event: ${event.title?.trim() || 'a Tokyo outing'}`,
+    `Event: ${sensitive?.title || event.title?.trim() || 'a Tokyo outing'}`,
     categories.length ? `Category: ${categories.join(', ')}` : 'Category: general outing',
   ]
-  if (summary) lines.push(`Theme context: ${summary}`)
+  if (sensitive) lines.push(`Theme context: ${sensitive.context}`)
+  else if (summary) lines.push(`Theme context: ${summary}`)
   for (const category of categories) {
     const note = CATEGORY_NOTES[category]
     if (note) lines.push(note)
   }
-  const extra = customInstruction?.replace(/\0/g, '').trim()
+  if (sensitive) {
+    lines.push(SAFETY_LOCK)
+    return lines.join('\n')
+  }
   if (!extra) return lines.join('\n')
   return [
     ...lines,
