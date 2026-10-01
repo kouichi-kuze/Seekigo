@@ -46,7 +46,8 @@ export async function processAdminPublishPost(opts: {
     intent === 'generated_image_custom' ||
     intent === 'generated_image_upload' ||
     intent === 'generated_image_approve' ||
-    intent === 'generated_image_reject'
+    intent === 'generated_image_reject' ||
+    intent === 'generated_image_approve_displayed'
   ) {
     return processAdminGeneratedImagePost({ request, url, cookies, form })
   }

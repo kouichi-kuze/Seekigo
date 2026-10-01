@@ -43,6 +43,19 @@ if (sp.get('image') === 'updated') {
   message = `イメージ画像を生成しました（未確認） event_id=${sp.get('event_id') ?? '?'}`
 } else if (sp.get('generated') === 'approved' || sp.get('generated') === 'rejected') {
   message = `イメージ画像を ${sp.get('generated')} にしました（event_id=${sp.get('event_id') ?? '?'}）`
+} else if (sp.get('generated_bulk') === '1') {
+  const okCount = Number(sp.get('ok') ?? '')
+  const ngCount = Number(sp.get('ng') ?? '')
+  const failedIds = (sp.get('failed') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => /^\d+$/.test(id))
+  const okText = Number.isSafeInteger(okCount) && okCount >= 0 ? String(okCount) : '?'
+  const ngText = Number.isSafeInteger(ngCount) && ngCount >= 0 ? String(ngCount) : '?'
+  message = `表示中の画像を採用しました。成功 ${okText}件 / 失敗 ${ngText}件`
+  if (failedIds.length > 0) {
+    message += `（失敗した event ID: ${failedIds.join(', ')}）`
+  }
 }
 
 try {
@@ -116,11 +129,34 @@ function generatedPreviewSrc(
 
   <section class="admin-panel">
     <h2>生成イメージ（未確認）</h2>
+    <form id="approve-displayed-form" method="POST" action="/admin/events/">
+      <input type="hidden" name="csrf_token" value={csrfToken} />
+      <input type="hidden" name="intent" value="generated_image_approve_displayed" />
+      <p class="approve-displayed__count">表示中 <span id="approve-displayed-count">{generatedReviews.length}</span>件</p>
+      {
+        generatedReviews.map((event) => (
+          <input type="hidden" name="event_id" value={String(event.id)} />
+        ))
+      }
+      <button
+        id="approve-displayed-button"
+        class="admin-btn"
+        type="submit"
+        disabled={generatedReviews.length === 0}
+      >
+        表示中の画像をすべて採用
+      </button>
+    </form>
     {generatedReviews.length === 0 ? (
       <p class="hint">pending のイメージ画像はありません。</p>
     ) : (
       generatedReviews.map((event) => (
-        <article class="image-card" id={`generated-${event.id}`}>
+        <article
+          class="image-card"
+          id={`generated-${event.id}`}
+          data-generated-review
+          data-event-id={String(event.id)}
+        >
           <h3>
             <a href={`/admin/events/${event.id}/`}>{event.title}</a>
           </h3>
@@ -190,6 +226,62 @@ function generatedPreviewSrc(
     )}
   </section>
 
+  <script>
+    const form = document.getElementById('approve-displayed-form')
+    const button = document.getElementById('approve-displayed-button')
+    const countEl = document.getElementById('approve-displayed-count')
+    let sending = false
+
+    function visibleReviewIds(): Set<string> {
+      const cards = document.querySelectorAll<HTMLElement>('[data-generated-review]')
+      const visible = new Set<string>()
+      cards.forEach((card) => {
+        if (card.hidden || card.style.display === 'none') return
+        const id = card.dataset.eventId
+        if (id) visible.add(id)
+      })
+      return visible
+    }
+
+    function syncDisplayedIds(): number {
+      if (!(form instanceof HTMLFormElement)) return 0
+      const visible = visibleReviewIds()
+      let count = 0
+      form.querySelectorAll<HTMLInputElement>('input[name="event_id"]').forEach((input) => {
+        const shown = visible.has(input.value)
+        input.disabled = !shown
+        if (shown) count += 1
+      })
+      if (countEl) countEl.textContent = String(count)
+      if (button instanceof HTMLButtonElement && !sending) button.disabled = count === 0
+      return count
+    }
+
+    form?.addEventListener('submit', (event) => {
+      if (sending) {
+        event.preventDefault()
+        return
+      }
+      const count = syncDisplayedIds()
+      if (count === 0) {
+        event.preventDefault()
+        return
+      }
+      const accepted = window.confirm(
+        `表示中の${count}件の画像をすべて採用します。よろしいですか？`,
+      )
+      if (!accepted) {
+        event.preventDefault()
+        return
+      }
+      sending = true
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = true
+        button.textContent = '採用しています…'
+      }
+    })
+  </script>
+
   <h2>公式画像の利用</h2>
 
   {
@@ -244,6 +336,20 @@ function generatedPreviewSrc(
 </AdminLayout>
 
 <style>
+  .approve-displayed__count {
+    margin: 0 0 0.75rem;
+    font-weight: 700;
+  }
+
+  #approve-displayed-form {
+    margin-bottom: 1.25rem;
+  }
+
+  #approve-displayed-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
   .image-card-head {
     display: flex;
     gap: 1rem;

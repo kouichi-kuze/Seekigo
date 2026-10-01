@@ -1,0 +1,72 @@
+---
+import EventCard from './EventCard.astro'
+import type { Event } from '../lib/events'
+import { resolveScheduleStatus } from '../lib/event-schedule'
+import { groupListedEvents, listGroupLabel } from '../lib/event-list-groups'
+
+interface Props {
+  events: Event[]
+}
+
+const groups = groupListedEvents(Astro.props.events, (event) => {
+  const spans = event.schedule_spans ?? []
+  return resolveScheduleStatus(spans, {
+    start_date: spans.length ? null : event.start_date,
+    end_date: spans.length ? null : event.end_date,
+  })
+})
+const showLabels = groups.length > 1
+---
+
+<div class="event-groups">
+  {
+    groups.map((group) => {
+      const label = showLabels ? listGroupLabel(group.key) : null
+      return (
+        <section class="event-group">
+          {label && <p class="event-group__label">{label}</p>}
+          <div class="card-grid">
+            {group.events.map((event) => (
+              <EventCard event={event} />
+            ))}
+          </div>
+        </section>
+      )
+    })
+  }
+</div>
+
+<style>
+  .event-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  .event-group__label {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--c-text);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--c-border);
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 32px 24px;
+    align-items: stretch;
+  }
+
+  @media (max-width: 640px) {
+    .event-groups {
+      gap: 28px;
+    }
+
+    .card-grid {
+      gap: 20px 16px;
+    }
+  }
+</style>

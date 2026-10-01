@@ -3,7 +3,7 @@
  * カテゴリ／条件別イベント一覧の共通レイアウト。
  * /tokyo/ のカードグリッド・余白トーンに合わせる（/tokyo/ 本体は変更しない）。
  */
-import EventCard from './EventCard.astro'
+import EventCardGroups from './EventCardGroups.astro'
 import type { Event } from '../lib/events'
 
 export type EmptyLink = {
@@ -68,11 +68,7 @@ const count = events.length
           <p class="list-events__count">
             {countLabel} {count}件
           </p>
-          <div class="card-grid">
-            {events.map((event) => (
-              <EventCard event={event} />
-            ))}
-          </div>
+          <EventCardGroups events={events} />
         </>
       ) : (
         <div class="list-empty">
@@ -145,18 +141,12 @@ const count = events.length
     padding: 40px 0 0;
   }
   .list-events__count {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--c-muted);
-    margin-bottom: 20px;
-    min-height: 20px;
-  }
-
-  /* /tokyo/ と同じカードグリッド */
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 20px;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--c-text);
+    margin-bottom: 24px;
+    min-height: 28px;
   }
 
   .list-empty {

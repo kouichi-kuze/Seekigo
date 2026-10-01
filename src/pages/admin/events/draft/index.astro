@@ -379,7 +379,7 @@ function eventDisplayImage(event: AdminEvent) {
             <>
               <label class="select-all">
                 <input type="checkbox" id="select-all" />
-                全選択
+                表示中をすべて選択
               </label>
               <button type="button" class="btn-deselect" id="deselect-all">
                 選択解除
@@ -393,7 +393,7 @@ function eventDisplayImage(event: AdminEvent) {
           )}
           <label class="select-all">
             <input type="checkbox" id="select-all-visible" />
-            表示中をすべて選択
+            表示中の画像をすべて選択
           </label>
           <span id="image-selected-count" class="selected-count">0件選択</span>
           <label class="bulk-usage-label">
@@ -1115,18 +1115,27 @@ function eventDisplayImage(event: AdminEvent) {
         return eventSelects.filter((c) => c.checked)
       }
 
+      function visibleDraftChecks() {
+        return visibleEventRows()
+          .map((row) => row.querySelector('.event-select.row-check'))
+          .filter(Boolean)
+      }
+
       function refreshPublishToolbar() {
         const draftChecks = eventSelects.filter(
           (c) => c.classList.contains('row-check'),
         )
         const selected = draftChecks.filter((c) => c.checked)
+        const visible = visibleDraftChecks()
+        const visibleSelected = visible.filter((c) => c.checked)
         if (countEl) countEl.textContent = `${selected.length}件選択`
         if (bulkBtn) bulkBtn.disabled = selected.length === 0
         if (selectAll) {
           selectAll.checked =
-            draftChecks.length > 0 && selected.length === draftChecks.length
+            visible.length > 0 && visibleSelected.length === visible.length
           selectAll.indeterminate =
-            selected.length > 0 && selected.length < draftChecks.length
+            visibleSelected.length > 0 &&
+            visibleSelected.length < visible.length
         }
       }
 
@@ -1173,8 +1182,8 @@ function eventDisplayImage(event: AdminEvent) {
 
       selectAll?.addEventListener('change', () => {
         const on = selectAll.checked
-        for (const c of eventSelects) {
-          if (c.classList.contains('row-check')) c.checked = on
+        for (const c of visibleDraftChecks()) {
+          c.checked = on
         }
         refreshToolbars()
       })
@@ -1216,7 +1225,9 @@ function eventDisplayImage(event: AdminEvent) {
           return
         }
         if (
-          !confirm(`${selected.length}件を Publish します。よろしいですか？`)
+          !confirm(
+            `選択した${selected.length}件のイベントを公開します。よろしいですか？`,
+          )
         ) {
           e.preventDefault()
         }

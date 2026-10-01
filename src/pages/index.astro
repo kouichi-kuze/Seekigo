@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro'
-import EventCard from '../components/EventCard.astro'
+import EventCardGroups from '../components/EventCardGroups.astro'
 import { getPublishedEvents } from '../lib/events'
 import SeekigoLogo from '../components/brand/SeekigoLogo.astro'
 
@@ -69,13 +69,13 @@ const events = await getPublishedEvents()
     <!-- ─── Events ─── -->
     <section class="events">
       <div class="inner">
-        <p class="events__count" id="events-count" aria-live="polite"></p>
+        <p class="events__count" id="events-count" aria-live="polite">
+          東京のイベント {events.length}件
+        </p>
 
         {events && events.length > 0 ? (
-          <div class="card-grid" id="card-grid">
-            {events.map((event) => (
-              <EventCard event={event} />
-            ))}
+          <div id="card-grid">
+            <EventCardGroups events={events} />
           </div>
         ) : (
           <p class="empty-state">現在掲載中のイベントはありません。</p>
@@ -156,7 +156,7 @@ const events = await getPublishedEvents()
     kids:    '子ども向けイベント',
     indoor:  '雨の日もOK（屋内）',
     night:   '夜のイベント',
-    all:     '開催中・近日開催のイベント',
+    all:     '東京のイベント',
   }
 
   function filterCards(filter: string) {
@@ -177,6 +177,13 @@ const events = await getPublishedEvents()
       }
       card.style.display = show ? '' : 'none'
       if (show) visible++
+    })
+
+    document.querySelectorAll<HTMLElement>('.event-group').forEach((group) => {
+      const any = [...group.querySelectorAll<HTMLElement>('.event-card')].some(
+        (card) => card.style.display !== 'none',
+      )
+      group.hidden = !any
     })
 
     if (countEl) countEl.textContent = `${LABELS[filter] ?? 'イベント'} ${visible}件`
@@ -393,18 +400,12 @@ const events = await getPublishedEvents()
   /* ─── Events ─── */
   .events { padding: 40px 0 0; }
   .events__count {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--c-muted);
-    margin-bottom: 20px;
-    min-height: 20px;
-  }
-
-  /* ─── Card Grid ─── */
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 20px;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--c-text);
+    margin-bottom: 24px;
+    min-height: 28px;
   }
 
   /* ─── States ─── */

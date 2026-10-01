@@ -8,6 +8,7 @@ import {
   readAdminPostForm,
   verifyAdminCsrf,
 } from './admin-security'
+import { classifyDisplayedApprovals } from './generated-image-review'
 import {
   generateEventImage,
   normalizeGeneratedImageInstruction,
@@ -41,6 +42,62 @@ export async function processAdminGeneratedImagePost(opts: {
     return { ok: false, message: `Security check failed: ${csrfCheck.reason}` }
   }
 
+  const intent = String(form.get('intent') ?? '')
+  const admin = createAdminClient()
+
+  if (intent === 'generated_image_approve_displayed') {
+    const requestedIds = parsePositiveIntIds(form.getAll('event_id'))
+    if (requestedIds.length === 0) {
+      return { ok: false, message: '表示中の画像がありません' }
+    }
+    const loaded = await admin
+      .from('events')
+      .select('id, generated_image_status, generated_image_url')
+      .in('id', requestedIds)
+    if (loaded.error) return { ok: false, message: loaded.error.message }
+
+    const classified = classifyDisplayedApprovals(
+      requestedIds,
+      (loaded.data ?? []) as Array<{
+        id: number
+        generated_image_status: string | null
+        generated_image_url: string | null
+      }>,
+    )
+    const failed = [...classified.failedIds]
+    let approvedIds: number[] = []
+    if (classified.approveIds.length > 0) {
+      const updated = await admin
+        .from('events')
+        .update({
+          generated_image_status: 'approved',
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', classified.approveIds)
+        .eq('generated_image_status', 'pending')
+        .select('id')
+      if (updated.error) {
+        failed.push(...classified.approveIds)
+      } else {
+        const saved = new Set(
+          ((updated.data ?? []) as Array<{ id: number }>).map((row) => row.id),
+        )
+        approvedIds = classified.approveIds.filter((id) => saved.has(id))
+        failed.push(...classified.approveIds.filter((id) => !saved.has(id)))
+      }
+    }
+    const params = new URLSearchParams({
+      generated_bulk: '1',
+      ok: String(approvedIds.length),
+      ng: String(failed.length),
+    })
+    if (failed.length > 0) params.set('failed', failed.join(','))
+    return {
+      ok: true,
+      redirectTo: `/admin/events/reviews/image/?${params.toString()}`,
+    }
+  }
+
   const ids = parsePositiveIntIds(
     [form.get('event_id')].filter(Boolean) as FormDataEntryValue[],
   )
@@ -48,8 +105,6 @@ export async function processAdminGeneratedImagePost(opts: {
     return { ok: false, message: '1件だけ指定してください' }
   }
   const eventId = ids[0]
-  const intent = String(form.get('intent') ?? '')
-  const admin = createAdminClient()
   const returnTo = String(form.get('return_to') ?? '').trim()
   const back =
     returnTo.startsWith('/admin/events/') ? returnTo : `/admin/events/${eventId}/`
