@@ -20,6 +20,7 @@ import {
   extractEnjoytokyoEventId,
   extractGotokyoSpotId,
   extractWalkerplusEventId,
+  isEventSourceName,
   type EventSourceName,
 } from './event-sources'
 
@@ -58,6 +59,18 @@ type ReviewRow = {
   incoming_payload: IncomingPayload
   candidate_event_id: number | null
   duplicate_status: string
+}
+
+function isValidYmd(value: string | null | undefined): boolean {
+  if (!value?.trim()) return false
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
+}
+
+function assertDedupeReviewSource(name: string): EventSourceName {
+  if (!isEventSourceName(name)) {
+    throw new Error(`Invalid source name: ${name}`)
+  }
+  return name
 }
 
 function resolveSourceEventId(
@@ -167,10 +180,7 @@ async function linkExisting(
   if (error) throw error
   if (!event) throw new Error(`Candidate event id=${candidateId} not found`)
 
-  const sourceName = review.incoming_source_name as EventSourceName
-  if (sourceName !== 'gotokyo' && sourceName !== 'enjoytokyo') {
-    throw new Error(`Invalid source name: ${review.incoming_source_name}`)
-  }
+  const sourceName = assertDedupeReviewSource(review.incoming_source_name)
 
   const payload = review.incoming_payload ?? {}
   const sourceUrl =
@@ -211,10 +221,7 @@ async function createNewDraft(
   admin: ReturnType<typeof createAdminClient>,
   review: ReviewRow,
 ): Promise<number> {
-  const sourceName = review.incoming_source_name as EventSourceName
-  if (sourceName !== 'gotokyo' && sourceName !== 'enjoytokyo') {
-    throw new Error(`Invalid source name: ${review.incoming_source_name}`)
-  }
+  const sourceName = assertDedupeReviewSource(review.incoming_source_name)
 
   const payload = review.incoming_payload ?? {}
   const title = String(payload.title ?? '').trim()
@@ -293,9 +300,7 @@ async function createNewDraft(
     summary: payload.summary ?? null,
     image_url: payload.image_url ?? null,
     ...(payload.image_url
-      ? defaultImageMetaForSource(
-          sourceName === 'gotokyo' ? 'gotokyo' : 'enjoytokyo',
-        )
+      ? defaultImageMetaForSource(sourceName)
       : {
           image_usage_status: 'unknown' as const,
           image_source: null,
@@ -355,6 +360,64 @@ async function rejectReview(
   })
 }
 
+export type DedupeCreateBulkItem =
+  | { reviewId: number; ok: true; eventId: number }
+  | { reviewId: number; ok: false; message: string }
+
+/**
+ * 選択された review だけを、個別の dedupe_create と同じ処理で1件ずつ確定する。
+ * 1件の失敗はそこで止めず、次の review へ進む。
+ */
+export async function applyDedupeCreateSelected(
+  admin: ReturnType<typeof createAdminClient>,
+  reviewIds: number[],
+): Promise<DedupeCreateBulkItem[]> {
+  const results: DedupeCreateBulkItem[] = []
+  for (const reviewId of reviewIds) {
+    try {
+      const result = await applyDedupeReviewAction(
+        admin,
+        'dedupe_create',
+        reviewId,
+      )
+      if (result.eventId == null) {
+        throw new Error('create returned no event id')
+      }
+      results.push({ reviewId, ok: true, eventId: result.eventId })
+    } catch (error) {
+      results.push({
+        reviewId,
+        ok: false,
+        message: error instanceof Error ? error.message : 'Dedupe review failed',
+      })
+    }
+  }
+  return results
+}
+
+/** レビュー1件を確定する。review の更新は events / event_sources の保存より後。 */
+export async function applyDedupeReviewAction(
+  admin: ReturnType<typeof createAdminClient>,
+  intent: string,
+  reviewId: number,
+): Promise<{ kind: 'linked' | 'created' | 'rejected'; eventId: number | null }> {
+  const review = await loadPendingReview(admin, reviewId)
+
+  if (intent === 'dedupe_link') {
+    const eventId = await linkExisting(admin, review)
+    return { kind: 'linked', eventId }
+  }
+  if (intent === 'dedupe_create') {
+    const eventId = await createNewDraft(admin, review)
+    return { kind: 'created', eventId }
+  }
+  if (intent === 'dedupe_reject') {
+    await rejectReview(admin, review)
+    return { kind: 'rejected', eventId: null }
+  }
+  throw new Error('Invalid dedupe review request')
+}
+
 /** DEV 用: dedupe review POST を処理 */
 export async function processAdminDedupeReviewPost(opts: {
   request: Request
@@ -376,6 +439,30 @@ export async function processAdminDedupeReviewPost(opts: {
   }
 
   const intent = String(form.get('intent') ?? '')
+  const admin = createAdminClient()
+
+  if (intent === 'dedupe_create_bulk') {
+    const ids = parsePositiveIntIds(form.getAll('review_id'))
+    if (ids.length === 0) {
+      return { ok: false, message: 'レビューが選択されていません' }
+    }
+    const results = await applyDedupeCreateSelected(admin, ids)
+    const created = results.filter((item) => item.ok)
+    const failed = results.filter((item) => !item.ok)
+    const params = new URLSearchParams({
+      review: 'created_bulk',
+      created: String(created.length),
+      failed: String(failed.length),
+    })
+    if (failed.length > 0) {
+      params.set('failed_ids', failed.map((item) => String(item.reviewId)).join(','))
+    }
+    return {
+      ok: true,
+      redirectTo: `/admin/events/draft/?${params.toString()}`,
+    }
+  }
+
   const ids = parsePositiveIntIds(
     [form.get('review_id')].filter(Boolean) as FormDataEntryValue[],
   )
@@ -383,30 +470,30 @@ export async function processAdminDedupeReviewPost(opts: {
     return { ok: false, message: 'Invalid review id' }
   }
   const reviewId = ids[0]
-  const admin = createAdminClient()
-  const review = await loadPendingReview(admin, reviewId)
-
-  if (intent === 'dedupe_link') {
-    const eventId = await linkExisting(admin, review)
-    return {
-      ok: true,
-      redirectTo: `/admin/events/draft/?review=linked&event_id=${eventId}`,
+  try {
+    const result = await applyDedupeReviewAction(admin, intent, reviewId)
+    if (result.kind === 'linked') {
+      return {
+        ok: true,
+        redirectTo: `/admin/events/draft/?review=linked&event_id=${result.eventId}`,
+      }
     }
-  }
-
-  if (intent === 'dedupe_create') {
-    const eventId = await createNewDraft(admin, review)
-    return {
-      ok: true,
-      redirectTo: `/admin/events/draft/?review=created&event_id=${eventId}`,
+    if (result.kind === 'created') {
+      return {
+        ok: true,
+        redirectTo: `/admin/events/draft/?review=created&event_id=${result.eventId}`,
+      }
     }
-  }
-
-  if (intent === 'dedupe_reject') {
-    await rejectReview(admin, review)
+    if (result.kind === 'rejected') {
+      return {
+        ok: true,
+        redirectTo: `/admin/events/draft/?review=rejected&review_id=${reviewId}`,
+      }
+    }
+  } catch (error) {
     return {
-      ok: true,
-      redirectTo: `/admin/events/draft/?review=rejected&review_id=${reviewId}`,
+      ok: false,
+      message: error instanceof Error ? error.message : 'Dedupe review failed',
     }
   }
 

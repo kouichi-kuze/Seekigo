@@ -4,8 +4,8 @@
  * 優先順位:
  * 1. exact  — official_url / source_url / (正規化 title + start_date)
  * 2. likely — タイトル類似 + 日付 + 会場（+ area）
- * 3. ambiguous — タイトルのみ似ている等（自動統合しない）
- * 4. none
+ * 3. ambiguous — タイトルが高類似だが日付が違う、または日付は合うが会場が弱い（自動統合しない）
+ * 4. none — 会場一致のみ、area 一致のみ、タイトルも日付も違う場合
  *
  * 安全性: exact でも本体マージは呼び出し側で禁止すること。
  */
@@ -81,7 +81,6 @@ export type DuplicateMatchResult = {
 const TITLE_SIM_HIGH = 0.82
 const TITLE_SIM_AMBIGUOUS = 0.72
 const VENUE_SIM_HIGH = 0.75
-const VENUE_SIM_AMBIGUOUS = 0.85
 const DATE_OVERLAP_STRONG = 0.5
 
 /**
@@ -720,12 +719,6 @@ export function matchAgainstExisting(
     .filter((s) => s.titleSim >= TITLE_SIM_AMBIGUOUS)
     .sort((a, b) => b.titleSim - a.titleSim)
 
-  const venueOnly = scored
-    .filter(
-      (s) => s.venueSim >= VENUE_SIM_AMBIGUOUS && s.titleSim < TITLE_SIM_HIGH,
-    )
-    .sort((a, b) => b.venueSim - a.venueSim)
-
   const titleAndDateNoVenue = scored
     .filter(
       (s) =>
@@ -768,23 +761,6 @@ export function matchAgainstExisting(
       best.ex,
       `ambiguous: title similar only (${best.titleSim.toFixed(2)}); dates/venue not strong`,
       Number((0.35 + best.titleSim * 0.2).toFixed(3)),
-      scores,
-    )
-  }
-
-  if (venueOnly.length > 0) {
-    const best = venueOnly[0]
-    const scores: DuplicateMatchScores = {
-      title_similarity: Number(best.titleSim.toFixed(3)),
-      date_overlap_ratio: Number(best.date.ratio.toFixed(3)),
-      venue_similarity: Number(best.venueSim.toFixed(3)),
-      area_match: best.areaMatch,
-    }
-    return resultAmbiguous(
-      candidate,
-      best.ex,
-      `ambiguous: venue similar only (${best.venueSim.toFixed(2)})`,
-      Number((0.3 + best.venueSim * 0.15).toFixed(3)),
       scores,
     )
   }

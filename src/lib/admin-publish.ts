@@ -55,6 +55,7 @@ export async function processAdminPublishPost(opts: {
   if (
     intent === 'dedupe_link' ||
     intent === 'dedupe_create' ||
+    intent === 'dedupe_create_bulk' ||
     intent === 'dedupe_reject'
   ) {
     return processAdminDedupeReviewPost({ request, url, cookies, form })

@@ -77,6 +77,7 @@ let message: string | null = null
 let errorMessage: string | null = Astro.url.searchParams.get('error')
 
 const csrfToken = getOrCreateAdminCsrfToken(Astro.cookies)
+Astro.response.headers.set('Cache-Control', 'no-store')
 
 const publishedCount = Astro.url.searchParams.get('published')
 const publishedTitle = Astro.url.searchParams.get('title')
@@ -99,6 +100,21 @@ if (bulkCount && !message) {
   message = `同一イベントとして紐付けました (event_id=${reviewEventId ?? '?'})`
 } else if (reviewResult === 'created') {
   message = `別イベントとして draft 登録しました (event_id=${reviewEventId ?? '?'})`
+} else if (reviewResult === 'created_bulk') {
+  const createdN = Number(Astro.url.searchParams.get('created'))
+  const failedN = Number(Astro.url.searchParams.get('failed'))
+  const createdText =
+    Number.isSafeInteger(createdN) && createdN >= 0 ? String(createdN) : '0'
+  const failedText =
+    Number.isSafeInteger(failedN) && failedN >= 0 ? String(failedN) : '0'
+  const failedIds = (Astro.url.searchParams.get('failed_ids') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => /^\d+$/.test(id))
+  message = `別イベントとして draft 登録しました。成功 ${createdText}件 / 失敗 ${failedText}件`
+  if (failedIds.length > 0) {
+    message += `。失敗した review ID: ${failedIds.join(', ')}`
+  }
 } else if (reviewResult === 'rejected') {
   message = 'この候補を登録しない（rejected）にしました'
 } else if (imageUpdated === 'updated') {
@@ -198,7 +214,9 @@ try {
 
     if (reviewError) throw reviewError
 
-    const pending = (reviewData ?? []) as ReviewRow[]
+    const pending = ((reviewData ?? []) as ReviewRow[]).filter(
+      (row) => row.status === 'pending',
+    )
     const candidateIds = [
       ...new Set(
         pending
@@ -415,11 +433,32 @@ function eventDisplayImage(event: AdminEvent) {
         <h2>重複候補レビュー</h2>
         <p class="section-note">
           likely / ambiguous のみ。exact は自動 attach、none は draft 作成済みです。
-          published 本体は紐付け時も変更しません。
+          会場や area が同じだけでは候補にしません。published 本体は紐付け時も変更しません。
+          処理済み（created / linked / rejected）は再読込後もここには出ません。
         </p>
 
         {!loadError && reviews.length === 0 && (
           <p>現在、pending の重複候補はありません。</p>
+        )}
+
+        {reviews.length > 0 && (
+          <form
+            method="POST"
+            id="dedupe-create-bulk-form"
+            class="dedupe-bulk-bar"
+            action="/admin/events/"
+          >
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="intent" value="dedupe_create_bulk" />
+            <button
+              type="submit"
+              id="dedupe-create-bulk"
+              class="btn-create"
+              disabled
+            >
+              選択したイベントを別イベントとして登録
+            </button>
+          </form>
         )}
 
         <div class="review-list">
@@ -429,6 +468,16 @@ function eventDisplayImage(event: AdminEvent) {
             return (
               <article class="review-card">
                 <div class="review-meta">
+                  <label class="dedupe-select">
+                    <input
+                      type="checkbox"
+                      class="dedupe-create-check"
+                      name="review_id"
+                      value={String(review.id)}
+                      form="dedupe-create-bulk-form"
+                    />
+                    選択
+                  </label>
                   <span class={`badge badge-${review.duplicate_status}`}>
                     {review.duplicate_status}
                   </span>
@@ -1233,6 +1282,44 @@ function eventDisplayImage(event: AdminEvent) {
         }
       })
 
+      const dedupeBulkForm = document.getElementById('dedupe-create-bulk-form')
+      const dedupeBulkBtn = document.getElementById('dedupe-create-bulk')
+      const dedupeChecks = Array.from(
+        document.querySelectorAll('.dedupe-create-check'),
+      )
+      let dedupeBulkSubmitting = false
+
+      function refreshDedupeBulk() {
+        const selected = dedupeChecks.filter((c) => c.checked).length
+        if (dedupeBulkBtn) dedupeBulkBtn.disabled = selected === 0
+      }
+
+      for (const check of dedupeChecks) {
+        check.addEventListener('change', refreshDedupeBulk)
+      }
+      refreshDedupeBulk()
+
+      dedupeBulkForm?.addEventListener('submit', (e) => {
+        if (dedupeBulkSubmitting) {
+          e.preventDefault()
+          return
+        }
+        const selected = dedupeChecks.filter((c) => c.checked).length
+        if (selected === 0) {
+          e.preventDefault()
+          return
+        }
+        if (
+          !confirm(
+            `選択した${selected}件を、それぞれ別イベントとしてdraft登録します。よろしいですか？`,
+          )
+        ) {
+          e.preventDefault()
+          return
+        }
+        dedupeBulkSubmitting = true
+      })
+
       for (const form of document.querySelectorAll(
         '.review-actions form',
       )) {
@@ -1587,6 +1674,24 @@ function eventDisplayImage(event: AdminEvent) {
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  .dedupe-bulk-bar {
+    display: flex;
+    align-items: center;
+    margin: 0.75rem 0 1rem;
+  }
+
+  .dedupe-bulk-bar button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .dedupe-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 700;
   }
 
   .review-card {

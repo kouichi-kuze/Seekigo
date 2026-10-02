@@ -4,7 +4,14 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-export type EventSourceName = 'gotokyo' | 'enjoytokyo' | 'walkerplus'
+/** 重複レビューで扱える source。追加するときはこの配列だけ増やす。 */
+export const EVENT_SOURCE_NAMES = ['gotokyo', 'enjoytokyo', 'walkerplus'] as const
+
+export type EventSourceName = (typeof EVENT_SOURCE_NAMES)[number]
+
+export function isEventSourceName(value: string): value is EventSourceName {
+  return (EVENT_SOURCE_NAMES as readonly string[]).includes(value)
+}
 
 export type EventSourceRow = {
   event_id: number
