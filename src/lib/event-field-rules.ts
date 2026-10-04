@@ -53,6 +53,11 @@ const NEIGHBORHOOD_PATTERNS: Array<{ re: RegExp; slug: string }> = [
  */
 const WARD_CITY_PATTERNS: Array<{ re: RegExp; slug: string }> = [
   { re: /東大和市|higashiyamato/, slug: 'higashiyamato' },
+  { re: /あきる野市|akiruno/, slug: 'akiruno' },
+  { re: /国分寺市|kokubunji/, slug: 'kokubunji' },
+  { re: /羽村市|hamura/, slug: 'hamura' },
+  { re: /国立市|kunitachi/, slug: 'kunitachi' },
+  { re: /府中市|fuchu/, slug: 'fuchu' },
   { re: /多摩市|(?:^|[^a-z])tama(?:$|[^a-z-])/, slug: 'tama' },
   { re: /町田市|machida/, slug: 'machida' },
   { re: /渋谷区|(?:^|[^a-z])shibuya(?:$|[^a-z-])/, slug: 'shibuya' },
@@ -344,19 +349,24 @@ export const NEIGHBORHOOD_TO_MUNICIPALITY: Record<string, string> = {
 /** 区・市として municipality に入れてよいスラッグ。街スラッグは含めない。 */
 export const MUNICIPALITY_SLUGS = [
   'adachi',
+  'akiruno',
   'arakawa',
   'bunkyo',
   'chiyoda',
   'chofu',
   'chuo',
   'edogawa',
+  'fuchu',
   'hachioji',
+  'hamura',
   'higashiyamato',
   'itabashi',
   'katsushika',
   'kita',
   'koganei',
+  'kokubunji',
   'koto',
+  'kunitachi',
   'machida',
   'meguro',
   'minato',
@@ -410,6 +420,11 @@ const REVIEW_AREA_SET = new Set<string>(MUNICIPALITY_REVIEW_AREA_SLUGS)
  */
 const ADDRESS_MUNICIPALITY_PATTERNS: Array<{ re: RegExp; slug: string }> = [
   { re: /東大和市/, slug: 'higashiyamato' },
+  { re: /あきる野市/, slug: 'akiruno' },
+  { re: /国分寺市/, slug: 'kokubunji' },
+  { re: /羽村市/, slug: 'hamura' },
+  { re: /国立市/, slug: 'kunitachi' },
+  { re: /府中市/, slug: 'fuchu' },
   { re: /八王子市/, slug: 'hachioji' },
   { re: /武蔵野市/, slug: 'musashino' },
   { re: /横浜市/, slug: 'yokohama' },

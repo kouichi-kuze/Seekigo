@@ -2,13 +2,17 @@
  * DEV admin: イベント専用イメージ画像を1枚生成し、採用状態だけを変える。
  * image_url / image_usage_status / image_credit / 本文は触らない。
  */
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from './supabase-admin'
 import {
   parsePositiveIntIds,
   readAdminPostForm,
   verifyAdminCsrf,
 } from './admin-security'
-import { classifyDisplayedApprovals } from './generated-image-review'
+import {
+  classifyDisplayedApprovals,
+  type GeneratedImageReviewRow,
+} from './generated-image-review'
 import {
   generateEventImage,
   normalizeGeneratedImageInstruction,
@@ -23,6 +27,60 @@ type AdminCookies = {
 export type AdminGeneratedImageResult =
   | { ok: true; redirectTo: string }
   | { ok: false; message: string }
+
+export type DisplayedImageApproval = {
+  approvedIds: number[]
+  failedIds: number[]
+}
+
+/**
+ * POSTされた ID だけを見る。DB上の pending を一括では更新しない。
+ * pending かつ generated_image_url がある行だけを、1件ずつ approved にする。
+ * events.status は更新しない。
+ */
+export async function approveDisplayedGeneratedImages(
+  admin: SupabaseClient,
+  requestedIds: number[],
+): Promise<DisplayedImageApproval> {
+  const approvedIds: number[] = []
+  const failedIds: number[] = []
+
+  for (const id of requestedIds) {
+    const loaded = await admin
+      .from('events')
+      .select('id, generated_image_status, generated_image_url')
+      .eq('id', id)
+      .maybeSingle()
+    if (loaded.error || !loaded.data) {
+      failedIds.push(id)
+      continue
+    }
+    const classified = classifyDisplayedApprovals(
+      [id],
+      [loaded.data as GeneratedImageReviewRow],
+    )
+    if (classified.approveIds.length !== 1) {
+      failedIds.push(id)
+      continue
+    }
+    const updated = await admin
+      .from('events')
+      .update({
+        generated_image_status: 'approved',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('generated_image_status', 'pending')
+      .select('id')
+    if (updated.error || (updated.data ?? []).length !== 1) {
+      failedIds.push(id)
+      continue
+    }
+    approvedIds.push(id)
+  }
+
+  return { approvedIds, failedIds }
+}
 
 export async function processAdminGeneratedImagePost(opts: {
   request: Request
@@ -46,52 +104,23 @@ export async function processAdminGeneratedImagePost(opts: {
   const admin = createAdminClient()
 
   if (intent === 'generated_image_approve_displayed') {
-    const requestedIds = parsePositiveIntIds(form.getAll('event_id'))
+    const requestedIds = parsePositiveIntIds([
+      ...form.getAll('event_id'),
+      ...form.getAll('event_ids'),
+    ])
     if (requestedIds.length === 0) {
       return { ok: false, message: '表示中の画像がありません' }
     }
-    const loaded = await admin
-      .from('events')
-      .select('id, generated_image_status, generated_image_url')
-      .in('id', requestedIds)
-    if (loaded.error) return { ok: false, message: loaded.error.message }
-
-    const classified = classifyDisplayedApprovals(
+    const { approvedIds, failedIds } = await approveDisplayedGeneratedImages(
+      admin,
       requestedIds,
-      (loaded.data ?? []) as Array<{
-        id: number
-        generated_image_status: string | null
-        generated_image_url: string | null
-      }>,
     )
-    const failed = [...classified.failedIds]
-    let approvedIds: number[] = []
-    if (classified.approveIds.length > 0) {
-      const updated = await admin
-        .from('events')
-        .update({
-          generated_image_status: 'approved',
-          updated_at: new Date().toISOString(),
-        })
-        .in('id', classified.approveIds)
-        .eq('generated_image_status', 'pending')
-        .select('id')
-      if (updated.error) {
-        failed.push(...classified.approveIds)
-      } else {
-        const saved = new Set(
-          ((updated.data ?? []) as Array<{ id: number }>).map((row) => row.id),
-        )
-        approvedIds = classified.approveIds.filter((id) => saved.has(id))
-        failed.push(...classified.approveIds.filter((id) => !saved.has(id)))
-      }
-    }
     const params = new URLSearchParams({
       generated_bulk: '1',
       ok: String(approvedIds.length),
-      ng: String(failed.length),
+      ng: String(failedIds.length),
     })
-    if (failed.length > 0) params.set('failed', failed.join(','))
+    if (failedIds.length > 0) params.set('failed', failedIds.join(','))
     return {
       ok: true,
       redirectTo: `/admin/events/reviews/image/?${params.toString()}`,

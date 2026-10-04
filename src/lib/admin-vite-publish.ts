@@ -74,6 +74,9 @@ export function adminFailureRedirect(
   message: string,
 ): string {
   const intent = params.get('intent') ?? ''
+  if (intent === 'generated_image_approve_displayed') {
+    return `/admin/events/reviews/image/?error=${encodeURIComponent(message)}`
+  }
   if (intent.startsWith('generated_image_')) {
     const eventId = params.get('event_id') ?? ''
     const back = params.get('return_to') ?? ''

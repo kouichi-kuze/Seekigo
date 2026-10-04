@@ -6,10 +6,12 @@
  * npm run generate:event-images -- --event-id=123
  * npm run generate:event-images -- --event-id=92 --retry-blocked --dry-run
  * npm run generate:event-images -- --dry-run --allow-draft --walkerplus-batch=1 --limit=87
+ * npm run generate:event-images -- --dry-run --allow-draft --walkerplus-batch=2 --limit=75
  *
  * --limit の初期値は 5。省略しても全件は生成しない。
  * 通常は published かつ開催中・今後開催だけ。draft は自動では探さない。
- * draft は --allow-draft と --event-id または --walkerplus-batch=1 を両方指定したときだけ見る。
+ * draft は --allow-draft と --event-id、--walkerplus-batch=1、--walkerplus-batch=2 のいずれかを併用したときだけ見る。
+ * --walkerplus-batch=2 は第2公開バッチの event ID 75件だけを ID 指定で読む。draft 全件は走査しない。
  * --allow-draft だけでは実行しない。終了した draft、権利確認済み公式画像、既存の生成状態は対象にしない。
  * --event-id を指定しても対象条件は外さない。blocked の再試行は --retry-blocked と併用する。
  * --retry-blocked だけでは実行しない。
@@ -34,6 +36,7 @@ import {
   type ScheduleStatus,
 } from '../src/lib/event-schedule'
 import { WALKERPLUS_BATCH1_SOURCE_IDS } from './data/walkerplus-batch1-ids'
+import { PUBLISH_BATCH2_EVENT_IDS } from './data/publish-batch2-event-ids'
 
 config()
 
@@ -46,7 +49,7 @@ type Args = {
   eventId: number | null
   retryBlocked: boolean
   allowDraft: boolean
-  walkerplusBatch: 1 | null
+  walkerplusBatch: 1 | 2 | null
 }
 
 function parseArgs(argv: string[]): Args {
@@ -55,7 +58,7 @@ function parseArgs(argv: string[]): Args {
   let eventId: number | null = null
   let retryBlocked = false
   let allowDraft = false
-  let walkerplusBatch: 1 | null = null
+  let walkerplusBatch: 1 | 2 | null = null
   for (const arg of argv) {
     if (arg === '--dry-run') {
       dryRun = true
@@ -71,8 +74,10 @@ function parseArgs(argv: string[]): Args {
     }
     if (arg.startsWith('--walkerplus-batch=')) {
       const batch = Number(arg.slice('--walkerplus-batch='.length))
-      if (batch !== 1) throw new Error('--walkerplus-batch は 1 だけ指定できます')
-      walkerplusBatch = 1
+      if (batch !== 1 && batch !== 2) {
+        throw new Error('--walkerplus-batch は 1 または 2 だけ指定できます')
+      }
+      walkerplusBatch = batch
       continue
     }
     if (arg.startsWith('--limit=')) {
@@ -89,10 +94,10 @@ function parseArgs(argv: string[]): Args {
     throw new Error('--retry-blocked は --event-id と併用してください')
   }
   if (allowDraft && eventId == null && walkerplusBatch == null) {
-    throw new Error('--allow-draft は --event-id または --walkerplus-batch=1 と併用してください')
+    throw new Error('--allow-draft は --event-id または --walkerplus-batch=1 または --walkerplus-batch=2 と併用してください')
   }
-  if (walkerplusBatch === 1 && !allowDraft) {
-    throw new Error('--walkerplus-batch=1 は --allow-draft と併用してください')
+  if (walkerplusBatch != null && !allowDraft) {
+    throw new Error(`--walkerplus-batch=${walkerplusBatch} は --allow-draft と併用してください`)
   }
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error('--limit は 1 以上の整数にしてください')
@@ -141,6 +146,19 @@ async function loadWalkerplusBatch1(client: SupabaseClient): Promise<BulkImageEv
     )
   }
   return loadByIds(client, ids)
+}
+
+async function loadPublishBatch2(client: SupabaseClient): Promise<BulkImageEvent[]> {
+  const ids = [...PUBLISH_BATCH2_EVENT_IDS]
+  const events = await loadByIds(client, ids)
+  const found = new Set(events.map((event) => event.id))
+  const missing = ids.filter((id) => !found.has(id))
+  if (missing.length > 0 || events.length !== ids.length) {
+    throw new Error(
+      `第2公開バッチは ${ids.length} 件だけです。見つかったイベントは ${events.length} 件、不足は ${missing.join(',') || 'なし'}`,
+    )
+  }
+  return events
 }
 
 async function loadPublished(client: SupabaseClient): Promise<BulkImageEvent[]> {
@@ -224,9 +242,22 @@ async function main() {
   const eligibility = { allowDraft: args.allowDraft }
   const events = args.walkerplusBatch === 1
     ? await loadWalkerplusBatch1(client)
-    : args.allowDraft && args.eventId != null
-      ? await loadByIds(client, [args.eventId])
-      : await loadPublished(client)
+    : args.walkerplusBatch === 2
+      ? await loadPublishBatch2(client)
+      : args.allowDraft && args.eventId != null
+        ? await loadByIds(client, [args.eventId])
+        : await loadPublished(client)
+  if (args.walkerplusBatch === 2) {
+    const allowed = new Set<number>(PUBLISH_BATCH2_EVENT_IDS)
+    const outside = events.filter((event) => !allowed.has(event.id))
+    if (outside.length > 0) {
+      throw new Error(
+        `第2公開バッチ以外のイベントを読みました: ${outside.map((event) => event.id).join(',')}`,
+      )
+    }
+    console.log(`${LOG} 指定 ID: ${PUBLISH_BATCH2_EVENT_IDS.length}`)
+    console.log(`${LOG} 読込 ID: ${events.map((event) => event.id).join(',')}`)
+  }
   const occurrences = await loadOccurrences(
     client,
     events.map((event) => event.id),
@@ -234,10 +265,18 @@ async function main() {
 
   const eligible: BulkImageEvent[] = []
   const excludedReasons = new Map<BulkImageExclusion, number>()
+  const excludedIds = new Map<BulkImageExclusion, number[]>()
+  const inactiveIds: number[] = []
+  const nonDraftIds: number[] = []
+  const generatedStatusSkips: string[] = []
   let activeCount = 0
   let excludedEvents = 0
   let inactiveCount = 0
   for (const event of events) {
+    if (args.walkerplusBatch === 2 && event.status !== 'draft') {
+      nonDraftIds.push(event.id)
+      continue
+    }
     const schedule = scheduleOf(event, occurrences)
     const reasons = bulkImageExclusionReasons(event, schedule, eligibility)
     if (reasons.length === 0) {
@@ -247,16 +286,33 @@ async function main() {
     }
     if (reasons.includes('not_active')) {
       inactiveCount += 1
+      inactiveIds.push(event.id)
       continue
     }
     activeCount += 1
     excludedEvents += 1
+    if (reasons.includes('generated_status')) {
+      generatedStatusSkips.push(`${event.id}:${event.generated_image_status ?? 'null'}`)
+    }
     for (const reason of reasons) {
       excludedReasons.set(reason, (excludedReasons.get(reason) ?? 0) + 1)
+      const ids = excludedIds.get(reason) ?? []
+      ids.push(event.id)
+      excludedIds.set(reason, ids)
     }
   }
   console.log(`${LOG} 開催中・今後開催: ${activeCount}`)
   console.log(`${LOG} 終了または開催日なし: ${inactiveCount}`)
+  if (args.walkerplusBatch === 2) {
+    console.log(`${LOG} draft 以外: ${nonDraftIds.join(', ') || 'なし'}`)
+    console.log(`${LOG} 終了または開催日なし ID: ${inactiveIds.join(', ') || 'なし'}`)
+    console.log(`${LOG} 既存 generated 状態: ${generatedStatusSkips.join(', ') || 'なし'}`)
+    for (const reason of BULK_IMAGE_EXCLUSIONS) {
+      const ids = excludedIds.get(reason) ?? []
+      if (ids.length === 0) continue
+      console.log(`${LOG} 除外 ID ${reason}: ${ids.join(', ')}`)
+    }
+  }
 
   const allowBlocked = args.retryBlocked && args.eventId != null
   const retryTarget = allowBlocked

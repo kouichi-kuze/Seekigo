@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "test": "tsx --test scripts/price-type-rules.test.ts scripts/walkerplus-limit.test.ts scripts/walkerplus-sessions.test.ts scripts/municipality-rules.test.ts scripts/event-image-eligibility.test.ts scripts/event-image-prompt-safety.test.ts scripts/admin-external-link.test.ts scripts/generated-image-review.test.ts scripts/admin-dedupe-review.test.ts scripts/event-dedupe-match.test.ts",
+    "test": "tsx --test scripts/price-type-rules.test.ts scripts/walkerplus-limit.test.ts scripts/walkerplus-sessions.test.ts scripts/municipality-rules.test.ts scripts/event-image-eligibility.test.ts scripts/event-image-prompt-safety.test.ts scripts/admin-external-link.test.ts scripts/generated-image-review.test.ts scripts/admin-dedupe-review.test.ts scripts/event-dedupe-match.test.ts scripts/publish-batch2-event-ids.test.ts",
     "preview": "astro preview",
     "astro": "astro",
     "fetch:gotokyo": "tsx scripts/fetch-gotokyo.ts",

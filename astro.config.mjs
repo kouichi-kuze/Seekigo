@@ -71,7 +71,7 @@ function seekigoAdminPublishDev() {
               const logged = formFields(body, contentType);
               console.log('[admin-dev] POST', path, {
                 intent: logged.get('intent'),
-                event_id: logged.get('event_id'),
+                event_id: logged.getAll('event_id'),
                 event_ids: logged.getAll('event_ids'),
               });
             }
@@ -101,6 +101,7 @@ function seekigoAdminPublishDev() {
             } catch (error) {
               const message =
                 error instanceof Error ? error.message : String(error);
+              console.error('[admin-dev] POST failed', message);
               const wantsJson = formFields(body, contentType).get('ajax') === '1';
               if (wantsJson) {
                 res.statusCode = 500;
@@ -113,7 +114,9 @@ function seekigoAdminPublishDev() {
               const failIntent = failParams.get('intent') ?? '';
               const failBack = failParams.get('return_to') ?? '';
               const failEventId = failParams.get('event_id') ?? '';
-              const failPath = failIntent.startsWith('generated_image_')
+              const failPath = failIntent === 'generated_image_approve_displayed'
+                ? '/admin/events/reviews/image/'
+                : failIntent.startsWith('generated_image_')
                 ? (failBack.startsWith('/admin/events/')
                     ? failBack.split('?')[0]
                     : failEventId
