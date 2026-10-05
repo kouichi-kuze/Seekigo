@@ -5,7 +5,11 @@ import {
   WALKERPLUS_BATCH2_LIST_PERIODS,
   WALKERPLUS_BATCH2_SOURCE_IDS,
 } from './data/walkerplus-batch2-ids'
-import { WALKERPLUS_BATCH3_SOURCE_IDS } from './data/walkerplus-batch3-ids'
+import {
+  WALKERPLUS_BATCH3_LIST_PERIODS,
+  WALKERPLUS_BATCH3_SOURCE_IDS,
+  WALKERPLUS_BATCH3_TODAY,
+} from './data/walkerplus-batch3-ids'
 import {
   parseWalkerplusDiscreteDates,
   planWalkerplusSchedule,
@@ -56,6 +60,25 @@ test('batch 3 is frozen separately from batch 1 and batch 2', () => {
     WALKERPLUS_BATCH3_SOURCE_IDS.some((id) => earlier.has(id)),
     false,
   )
+  assert.equal(
+    WALKERPLUS_BATCH3_SOURCE_IDS.every((id) =>
+      Boolean(WALKERPLUS_BATCH3_LIST_PERIODS[id]),
+    ),
+    true,
+  )
+  assert.equal(WALKERPLUS_BATCH3_LIST_PERIODS.ar0313e154513, '11月中旬～12月中旬')
+})
+
+test('a vague mid-month listing keeps the detail date span', () => {
+  const plan = planWalkerplusSchedule({
+    listPeriod: '11月中旬～12月中旬',
+    startDate: '2026-11-11',
+    endDate: '2026-12-20',
+    today: WALKERPLUS_BATCH3_TODAY,
+  })
+  assert.equal(plan.occurrences.length, 0)
+  assert.equal(plan.start_date, '2026-11-11')
+  assert.equal(plan.end_date, '2026-12-20')
 })
 
 test('adjacent listed days stay one span', () => {
