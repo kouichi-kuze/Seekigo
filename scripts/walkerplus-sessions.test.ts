@@ -11,6 +11,11 @@ import {
   WALKERPLUS_BATCH3_TODAY,
 } from './data/walkerplus-batch3-ids'
 import {
+  WALKERPLUS_BATCH4_LIST_PERIODS,
+  WALKERPLUS_BATCH4_SOURCE_IDS,
+  WALKERPLUS_BATCH4_TODAY,
+} from './data/walkerplus-batch4-ids'
+import {
   parseWalkerplusDiscreteDates,
   planWalkerplusSchedule,
 } from './lib/walkerplus-sessions'
@@ -67,6 +72,58 @@ test('batch 3 is frozen separately from batch 1 and batch 2', () => {
     true,
   )
   assert.equal(WALKERPLUS_BATCH3_LIST_PERIODS.ar0313e154513, '11月中旬～12月中旬')
+})
+
+test('batch 4 is frozen separately from earlier batches', () => {
+  assert.equal(WALKERPLUS_BATCH4_SOURCE_IDS.length, 50)
+  assert.equal(new Set(WALKERPLUS_BATCH4_SOURCE_IDS).size, 50)
+  assert.equal(
+    WALKERPLUS_BATCH4_SOURCE_IDS.every((id) => /^ar\d+e\d+$/.test(id)),
+    true,
+  )
+  const earlier = new Set<string>([
+    ...WALKERPLUS_BATCH1_SOURCE_IDS,
+    ...WALKERPLUS_BATCH2_SOURCE_IDS,
+    ...WALKERPLUS_BATCH3_SOURCE_IDS,
+  ])
+  assert.equal(
+    WALKERPLUS_BATCH4_SOURCE_IDS.some((id) => earlier.has(id)),
+    false,
+  )
+  assert.equal(
+    WALKERPLUS_BATCH4_SOURCE_IDS.every((id) =>
+      Boolean(WALKERPLUS_BATCH4_LIST_PERIODS[id]),
+    ),
+    true,
+  )
+})
+
+test('gapped Batch 4 dates stay occurrences and the parent is the next session', () => {
+  const beekeeping = planWalkerplusSchedule({
+    listPeriod: WALKERPLUS_BATCH4_LIST_PERIODS.ar0313e610361,
+    startDate: '2026-10-04',
+    endDate: '2026-10-11',
+    today: WALKERPLUS_BATCH4_TODAY,
+  })
+  assert.deepEqual(
+    beekeeping.occurrences.map((row) => row.start_date),
+    ['2026-10-04', '2026-10-11'],
+  )
+  assert.equal(beekeeping.start_date, '2026-10-11')
+  assert.equal(beekeeping.end_date, '2026-10-11')
+
+  const lecture = planWalkerplusSchedule({
+    listPeriod: WALKERPLUS_BATCH4_LIST_PERIODS.ar0313e616192,
+    startDate: '2026-10-04',
+    endDate: '2026-10-17',
+    today: WALKERPLUS_BATCH4_TODAY,
+  })
+  assert.deepEqual(
+    lecture.occurrences.map((row) => row.start_date),
+    ['2026-10-04', '2026-10-17'],
+  )
+  assert.equal(lecture.start_date, '2026-10-17')
+  assert.equal(lecture.end_date, '2026-10-17')
 })
 
 test('a vague mid-month listing keeps the detail date span', () => {

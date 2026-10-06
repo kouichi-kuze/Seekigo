@@ -109,6 +109,28 @@ test('Batch 3 city addresses resolve without changing priority', () => {
   assert.equal(inferMunicipalitySlug({ area: 'fuchu' }), 'fuchu')
 })
 
+test('小平市 is explicit and bare 多摩 or 小平 is not a city', () => {
+  assert.equal(
+    inferMunicipalitySlug({
+      address: '小平市美園町1丁目33-1',
+      venue: '小平駅前ショッピングセンター／ルネセブンストリート',
+    }),
+    'kodaira',
+  )
+  assert.equal(
+    inferMunicipalitySlug({
+      address: '小平市美園町1丁目33-1',
+      venue: '府中市の会場',
+    }),
+    'kodaira',
+  )
+  assert.equal(inferMunicipalitySlug({ venue: '小平駅前ショッピングセンター' }), null)
+  assert.equal(inferMunicipalitySlug({ address: '多摩', venue: '多摩' }), null)
+  assert.equal(inferMunicipalitySlug({ address: '東京都多摩市関戸' }), 'tama')
+  assert.equal(inferMunicipalitySlug({ address: '小金井市関野町' }), 'koganei')
+  assert.equal(inferMunicipalitySlug({ address: '小平市と府中市' }), null)
+})
+
 test('Batch 2 Akiruno addresses resolve safely', () => {
   assert.equal(
     inferMunicipalitySlug({
