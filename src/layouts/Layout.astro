@@ -26,6 +26,8 @@ interface Props {
    * Event detail only: show JP|EN header switcher.
    * Omit on list/TOP pages.
    */
+  /** 気分チップがあるページでは SP のカテゴリ行を出さない（重複を避ける） */
+  hideNavOnMobile?: boolean
   eventLanguageSwitcher?: {
     slug: string
     enPageAvailable?: boolean
@@ -44,6 +46,7 @@ const {
   locale = 'ja',
   hreflangAlternates = [],
   eventLanguageSwitcher,
+  hideNavOnMobile = false,
 } = Astro.props
 
 /** ビルド／描画時点の西暦（毎年手更新不要） */
@@ -74,6 +77,65 @@ const ogImageAlt =
   ogImageAltProp?.trim() ||
   (locale === 'en' ? 'Seekigo — Find it. Go.' : 'Seekigo — 探して、行く。')
 const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
+
+const currentPath = Astro.url.pathname.endsWith('/')
+  ? Astro.url.pathname
+  : `${Astro.url.pathname}/`
+const navItems =
+  locale === 'en'
+    ? [
+        { href: '/tokyo/today/', label: 'Today' },
+        { href: '/tokyo/this-weekend/', label: 'This weekend' },
+        { href: '/tokyo/free/', label: 'Free' },
+        { href: '/tokyo/with-kids/', label: 'With kids' },
+        { href: '/tokyo/rainy-day/', label: 'Rainy day' },
+        { href: '/tokyo/night/', label: 'Night' },
+      ]
+    : [
+        { href: '/tokyo/today/', label: '今日' },
+        { href: '/tokyo/this-weekend/', label: '今週末' },
+        { href: '/tokyo/free/', label: '無料' },
+        { href: '/tokyo/with-kids/', label: '子どもと' },
+        { href: '/tokyo/rainy-day/', label: '雨の日' },
+        { href: '/tokyo/night/', label: '夜' },
+        { href: '/tokyo/shibuya/', label: '渋谷' },
+        { href: '/tokyo/shinjuku/', label: '新宿' },
+      ]
+const footerGroups =
+  locale === 'en'
+    ? []
+    : [
+        {
+          title: '探す',
+          links: [
+            { href: '/tokyo/', label: '東京のイベント' },
+            { href: '/tokyo/today/', label: '今日のイベント' },
+            { href: '/tokyo/this-weekend/', label: '今週末のイベント' },
+          ],
+        },
+        {
+          title: '気分で',
+          links: [
+            { href: '/tokyo/free/', label: '無料で楽しむ' },
+            { href: '/tokyo/with-kids/', label: '子どもと行く' },
+            { href: '/tokyo/rainy-day/', label: '雨の日でもOK' },
+            { href: '/tokyo/night/', label: '夜から行ける' },
+          ],
+        },
+        {
+          title: 'エリア',
+          links: [
+            { href: '/tokyo/shibuya/', label: '渋谷' },
+            { href: '/tokyo/shinjuku/', label: '新宿' },
+          ],
+        },
+        {
+          title: 'Seekigoについて',
+          links: [
+            { href: '/contact/event-info/', label: '掲載・情報提供のご連絡' },
+          ],
+        },
+      ]
 ---
 
 <!doctype html>
@@ -124,48 +186,87 @@ const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
     <GoogleAnalytics />
   </head>
   <body>
+    <a class="skip-link" href="#main-content">{locale === 'en' ? 'Skip to content' : '本文へスキップ'}</a>
     <header class="site-header">
-      <div class="inner">
+      <div class="inner site-header__bar">
         <SeekigoLogo size="header" />
-        <div class="site-header__end">
-          {
-            locale === 'en' ? (
-              <nav class="site-nav" aria-label={navLabel}>
-                <a href="/tokyo/">Tokyo</a>
-                <a href="/tokyo/today/" class="site-nav__today">Today</a>
-                <a href="/tokyo/this-weekend/" class="site-nav__extra">This weekend</a>
-                <a href="/tokyo/free/" class="site-nav__extra">Free</a>
-                <a href="/tokyo/with-kids/" class="site-nav__extra">With kids</a>
-              </nav>
-            ) : (
-              <nav class="site-nav" aria-label={navLabel}>
-                <a href="/tokyo/">東京</a>
-                <a href="/tokyo/today/" class="site-nav__today">今日</a>
-                <a href="/tokyo/this-weekend/" class="site-nav__extra">今週末</a>
-                <a href="/tokyo/free/" class="site-nav__extra">無料</a>
-                <a href="/tokyo/with-kids/" class="site-nav__extra">子どもと</a>
-              </nav>
-            )
-          }
-          {
-            eventLanguageSwitcher && (
+        <nav
+          class:list={['site-nav', hideNavOnMobile && 'site-nav--hide-sp']}
+          aria-label={navLabel}
+        >
+          <ul class="site-nav__list">
+            {
+              navItems.map((item) => (
+                <li>
+                  <a
+                    href={item.href}
+                    class="site-nav__link"
+                    aria-current={currentPath === item.href ? 'page' : undefined}
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </nav>
+        {
+          eventLanguageSwitcher && (
+            <div class="site-header__lang">
               <LanguageSwitcher
                 slug={eventLanguageSwitcher.slug}
                 currentLocale={locale}
                 enPageAvailable={eventLanguageSwitcher.enPageAvailable}
                 jaPageAvailable={eventLanguageSwitcher.jaPageAvailable}
               />
-            )
-          }
-        </div>
+            </div>
+          )
+        }
       </div>
     </header>
 
-    <slot />
+    <script is:inline>
+      ;(() => {
+        const h = document.querySelector('.site-header')
+        if (!h) return
+        const set = () =>
+          document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px')
+        set()
+        if ('ResizeObserver' in window) new ResizeObserver(set).observe(h)
+      })()
+    </script>
+    <div id="main-content" class="site-main">
+      <slot />
+    </div>
 
     <footer class="site-footer">
-      <div class="inner site-footer__inner">
-        <SeekigoLogo size="footer" />
+      <div class="inner">
+        <div class="site-footer__top">
+          <div class="site-footer__brand">
+            <SeekigoLogo size="footer" />
+            <p class="site-footer__tagline">
+              {locale === 'en' ? 'Find it. Go.' : '探して、行く。東京の行き先発見サービス'}
+            </p>
+          </div>
+          {
+            footerGroups.length > 0 && (
+              <nav class="site-footer__nav" aria-label="フッターナビ">
+                {footerGroups.map((group) => (
+                  <div class="site-footer__group">
+                    <p class="site-footer__heading">{group.title}</p>
+                    <ul>
+                      {group.links.map((link) => (
+                        <li>
+                          <a href={link.href}>{link.label}</a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </nav>
+            )
+          }
+        </div>
         <p class="site-footer__copy">© {copyrightYear} Seekigo</p>
       </div>
     </footer>
@@ -178,11 +279,12 @@ const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
     --c-navy:         #0E2744;
     --c-cyan:         #00A3FF;
     --c-lime:         #A3E635;
-    --c-primary:      #00A3FF;
-    --c-primary-dk:   #0086CC;
+    --c-primary:      #0070BD;   /* 白文字・リンク用（白/#F8FAFC/#E6F5FF 上で AA 4.5:1 以上） */
+    --c-primary-dk:   #005A99;
+    --c-primary-soft: #E6F5FF;
     --c-accent:       #A3E635;
     --c-text:         #0E2744;
-    --c-muted:        #6B7280;
+    --c-muted:        #5B6472;
     --c-bg:           #F8FAFC;
     --c-white:        #FFFFFF;
     --c-border:       #E5E7EB;
@@ -211,18 +313,50 @@ const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
     color: var(--c-text);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
+  .site-main { flex: 1 0 auto; }
 
   img { max-width: 100%; display: block; }
 
   a { color: var(--c-primary); text-decoration: none; }
   a:hover { color: var(--c-primary-dk); }
 
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--c-cyan) 70%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
   h1, h2, h3, h4 { margin: 0; line-height: 1.3; }
   p { margin: 0; }
 </style>
 
 <style>
+  /* ─── Skip link ─── */
+  .skip-link {
+    position: absolute;
+    left: 8px;
+    top: -48px;
+    z-index: 200;
+    padding: 8px 14px;
+    background: var(--c-navy);
+    color: #fff !important;
+    border-radius: var(--r-sm);
+    font-size: 14px;
+  }
+  .skip-link:focus { top: 8px; }
+
   /* ─── Site Header ─── */
   .site-header {
     background: var(--c-white);
@@ -231,77 +365,81 @@ const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
     top: 0;
     z-index: 100;
   }
-  .site-header .inner {
-    max-width: var(--max-w);
-    margin: 0 auto;
-    padding: 0 var(--px);
-    height: 56px;
+  .site-header__bar {
+    height: 60px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 20px;
     min-width: 0;
   }
-
-  .site-header__end {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    flex-shrink: 1;
-    min-width: 0;
-  }
-
   .site-nav {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 1;
+    margin-left: auto;
     min-width: 0;
   }
-  .site-nav a {
+  .site-nav__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .site-nav__link {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 999px;
     font-size: 14px;
-    font-weight: 500;
-    color: var(--c-muted) !important;
-    transition: color 0.15s;
+    font-weight: 600;
+    color: var(--c-muted);
     white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
   }
-  .site-nav a:hover { color: var(--c-text) !important; }
-  .site-nav__today {
-    background: var(--c-primary);
-    color: var(--c-white) !important;
-    padding: 6px 14px;
-    border-radius: var(--r-lg);
-    font-size: 13px !important;
-    font-weight: 600 !important;
+  .site-nav__link:hover {
+    color: var(--c-text);
+    background: #F1F5F9;
   }
-  .site-nav__today:hover {
-    background: var(--c-primary-dk);
-    color: var(--c-white) !important;
+  .site-nav__link[aria-current='page'] {
+    color: var(--c-primary);
+    background: var(--c-primary-soft);
   }
-
-  /* SPでは主要2項目のみ（既存レイアウトを壊さない） */
-  @media (max-width: 719px) {
-    .site-header__end {
-      gap: 8px;
-    }
-    .site-nav {
-      gap: 10px;
-    }
-    .site-nav__extra {
-      display: none;
-    }
-    .site-nav__today {
-      padding: 6px 12px;
-    }
+  .site-header__lang {
+    flex-shrink: 0;
   }
 
-  @media (min-width: 720px) {
-    .site-header__end {
-      gap: 14px;
+  /* SP: ロゴ行 + 横スクロールのカテゴリ行 */
+  @media (max-width: 899px) {
+    .site-header__bar {
+      height: auto;
+      flex-wrap: wrap;
+      row-gap: 0;
+      padding-top: 10px;
     }
+    .site-header__lang { margin-left: auto; }
     .site-nav {
-      gap: 18px;
+      order: 3;
+      flex: 1 0 100%;
+      margin: 0 calc(var(--px) * -1);
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      mask-image: linear-gradient(90deg, #000 85%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+    }
+    .site-nav::-webkit-scrollbar { display: none; }
+    .site-nav--hide-sp { display: none; }
+    .site-header__bar:has(.site-nav--hide-sp) {
+      height: 56px;
+      padding-top: 0;
+    }
+    .site-nav__list {
+      padding: 6px var(--px) 8px;
+      gap: 4px;
+    }
+    .site-nav__link {
+      height: 32px;
+      font-size: 13px;
     }
   }
 
@@ -315,19 +453,66 @@ const navLabel = locale === 'en' ? 'Primary' : '主要ナビ'
 
   /* ─── Site Footer ─── */
   .site-footer {
-    margin-top: 80px;
-    border-top: 1px solid var(--c-border);
-    padding: 32px 0;
+    margin-top: 64px;
+    background: var(--c-navy);
+    color: rgba(255, 255, 255, 0.78);
+    padding: 48px 0 28px;
   }
-  .site-footer__inner {
+  .site-footer__top {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
     flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 32px 48px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .site-footer__brand :global(.seekigo-logo) {
+    background: #fff;
+    padding: 6px 12px;
+    border-radius: 10px;
+  }
+  .site-footer__tagline {
+    margin-top: 12px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+  .site-footer__nav {
+    display: grid;
+    grid-template-columns: repeat(4, auto);
+    gap: 24px 48px;
+  }
+  .site-footer__heading {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #fff;
+    margin-bottom: 10px;
+  }
+  .site-footer__group ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .site-footer__group a {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.78);
+  }
+  .site-footer__group a:hover {
+    color: #fff;
+    text-decoration: underline;
   }
   .site-footer__copy {
-    font-size: 13px;
-    color: var(--c-muted);
+    padding-top: 20px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+  @media (max-width: 899px) {
+    .site-footer__nav {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+    }
   }
 </style>

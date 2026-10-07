@@ -16,6 +16,8 @@ import {
 
 interface Props {
   locale?: SiteLocale
+  /** グループ見出しで状態が分かる一覧では false（終了のみ表示） */
+  showStatus?: boolean
   event: {
     id?: string | number
     slug?: string | null
@@ -42,12 +44,13 @@ interface Props {
   }
 }
 
-const { event, locale = 'ja' } = Astro.props
+const { event, locale = 'ja', showStatus = true } = Astro.props
 
 const priceChip = formatCardPriceChip(event.price_type, locale)
 const cardPrice =
   locale === 'en' ? formatPriceEn(event) : formatCardPriceLine(event)
 
+const isFreeChip = event.price_type === 'free'
 const hasAnyTag = Boolean(priceChip || event.is_kids || event.is_indoor || event.is_night)
 
 const scheduleSpans = event.schedule_spans ?? []
@@ -106,11 +109,10 @@ const detailUrl = event.slug
   data-indoor={event.is_indoor ? 'true' : 'false'}
   data-night={event.is_night ? 'true' : 'false'}
 >
-  <!-- Image -->
   <div class="card-image">
     <img
       src={displayImage.src}
-      alt={event.title}
+      alt=""
       loading="lazy"
       decoding="async"
       class:list={[
@@ -118,14 +120,19 @@ const detailUrl = event.slug
         isEnded && 'card-image--ended',
       ]}
     />
-
+    {statusLabel && (showStatus || isEnded) && (
+      <span class:list={['card-status', scheduleStatus && `card-status--${scheduleStatus}`]}>
+        {statusLabel}
+      </span>
+    )}
     {conceptLabel && (
       <span class="card-image__concept">{conceptLabel}</span>
     )}
   </div>
 
-  <!-- Body -->
   <div class="card-body">
+    {dateLabel && <p class="card-when">{dateLabel}</p>}
+
     <h2 class="card-title">
       {detailUrl ? (
         <a href={detailUrl} class="card-title__link card-title__link--stretch">
@@ -136,47 +143,40 @@ const detailUrl = event.slug
       )}
     </h2>
 
-    {(statusLabel || dateLabel) && (
-      <p class="card-when">
-        {statusLabel && (
-          <span class:list={['card-status', scheduleStatus && `card-status--${scheduleStatus}`]}>
-            {statusLabel}
-          </span>
+    {(placeLabel || event.venue || cardPrice) && (
+      <dl class="card-meta">
+        {(placeLabel || event.venue) && (
+          <>
+            <dt class="sr-only">{locale === 'en' ? 'Place' : '場所'}</dt>
+            <dd class="card-meta__item">
+              <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+              </svg>
+              <span class="card-meta__text">
+                {placeLabel && <strong class="card-area">{placeLabel}</strong>}
+                {placeLabel && event.venue && <span class="card-meta__sep" aria-hidden="true">·</span>}
+                {event.venue}
+              </span>
+            </dd>
+          </>
         )}
-        {dateLabel && <span class="card-when__date">{dateLabel}</span>}
-      </p>
+        {cardPrice && (
+          <>
+            <dt class="sr-only">{locale === 'en' ? 'Price' : '料金'}</dt>
+            <dd class="card-meta__item">
+              <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M3 6a2 2 0 012-2h10a2 2 0 012 2v1.5a1 1 0 01-.8.98 1.5 1.5 0 000 2.94 1 1 0 01.8.98V14a2 2 0 01-2 2H5a2 2 0 01-2-2v-1.6a1 1 0 01.8-.98 1.5 1.5 0 000-2.94A1 1 0 013 7.5V6z" />
+              </svg>
+              <span class="card-meta__text">{cardPrice.replace(/^料金[:：]\s*/, '')}</span>
+            </dd>
+          </>
+        )}
+      </dl>
     )}
-
-    {placeLabel && <p class="card-area">{placeLabel}</p>}
-
-    <dl class="card-meta">
-      {event.venue && (
-        <>
-          <dt class="sr-only">会場</dt>
-          <dd class="card-meta__item">
-            <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
-            </svg>
-            {event.venue}
-          </dd>
-        </>
-      )}
-      {cardPrice && (
-        <>
-          <dt class="sr-only">料金</dt>
-          <dd class="card-meta__item card-meta__price">
-            <svg class="meta-icon" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd" />
-            </svg>
-            <span class="card-price-text">{cardPrice}</span>
-          </dd>
-        </>
-      )}
-    </dl>
 
     {hasAnyTag && (
       <ul class="card-attrs">
-        {priceChip && <li class="tag">{priceChip}</li>}
+        {priceChip && <li class:list={['tag', isFreeChip && 'tag--free']}>{priceChip}</li>}
         {event.is_kids && <li class="tag">{locale === 'en' ? EVENT_UI_EN.forKids : '子ども向け'}</li>}
         {event.is_indoor && <li class="tag">{locale === 'en' ? EVENT_UI_EN.indoor : '屋内'}</li>}
         {event.is_night && <li class="tag">{locale === 'en' ? EVENT_UI_EN.night : '夜'}</li>}
@@ -186,26 +186,6 @@ const detailUrl = event.slug
     {event.summary && (
       <p class="card-summary">{event.summary}</p>
     )}
-
-    <div class="card-footer">
-      {detailUrl && (
-        <span class="card-detail-hint">詳細を見る →</span>
-      )}
-      {event.official_url && (
-        <a
-          class="card-cta"
-          href={event.official_url}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          公式サイト
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
-            <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
-          </svg>
-        </a>
-      )}
-    </div>
   </div>
 </article>
 
@@ -213,27 +193,32 @@ const detailUrl = event.slug
   /* ─── Card ─── */
   .event-card {
     background: var(--c-white);
-    border-radius: var(--r-md);
+    border-radius: 16px;
     border: 1px solid var(--c-border);
-    box-shadow: var(--shadow-sm);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     height: 100%;
     position: relative;
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
+    transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
   }
+  .event-card[hidden] { display: none; }
   .event-card--linked:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-3px);
-    cursor: pointer;
+    border-color: #CFE3F3;
+    box-shadow: 0 12px 28px rgba(14, 39, 68, 0.1);
+    transform: translateY(-2px);
   }
+  .event-card:focus-within {
+    outline: 3px solid color-mix(in srgb, var(--c-cyan) 70%, transparent);
+    outline-offset: 2px;
+  }
+  .card-title__link:focus-visible { outline: none; }
 
   /* ─── Image ─── */
   .card-image {
     position: relative;
-    aspect-ratio: 16 / 9;
-    background: var(--c-border);
+    aspect-ratio: 16 / 10;
+    background: #E8EEF4;
     overflow: hidden;
     flex-shrink: 0;
   }
@@ -242,106 +227,90 @@ const detailUrl = event.slug
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform 0.3s ease;
-  }
-  /* フォールバック画像（SVG）はシャープに見せる */
-  .card-image img.card-image--fallback {
-    object-fit: cover;
+    transition: transform 0.4s ease;
   }
   .card-image img.card-image--ended {
-    filter: grayscale(0.35) brightness(0.85);
+    filter: grayscale(0.6) brightness(0.9);
   }
   .event-card--linked:hover .card-image img {
-    transform: scale(1.03);
+    transform: scale(1.04);
+  }
+
+  .card-status {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 1;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    padding: 6px 9px;
+    border-radius: 999px;
+    color: var(--c-navy);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  }
+  .card-status--today {
+    color: #fff;
+    background: var(--c-primary);
+  }
+  .card-status--today::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: var(--c-lime);
+    vertical-align: 1px;
+  }
+  .card-status--ended {
+    color: #fff;
+    background: rgba(55, 65, 81, 0.85);
   }
 
   .card-image__concept {
     position: absolute;
-    left: 8px;
+    right: 8px;
     bottom: 8px;
     z-index: 1;
-    max-width: calc(100% - 16px);
     font-size: 10px;
-    font-weight: 700;
-    line-height: 1.2;
+    font-weight: 600;
+    line-height: 1;
     letter-spacing: 0.04em;
     color: #fff;
-    padding: 2px 6px;
-    border-radius: var(--r-sm);
-    background: rgba(17, 24, 39, 0.62);
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: rgba(14, 39, 68, 0.72);
   }
 
   /* ─── Body ─── */
   .card-body {
-    padding: 14px 16px 16px;
+    padding: 14px 16px 18px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     flex: 1;
+    min-width: 0;
   }
   .card-when {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 8px;
-    margin: 0;
-  }
-  .card-status {
-    flex: 0 0 auto;
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--c-muted);
-    background: #f3f4f6;
-    padding: 2px 6px;
-    border-radius: var(--r-sm);
-  }
-  .card-status--today {
-    color: var(--c-primary);
-    background: color-mix(in srgb, var(--c-primary) 10%, #fff);
-  }
-  .card-when__date {
-    min-width: 0;
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--c-muted);
-  }
-  .card-attrs {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .tag {
-    background: var(--c-accent);
-    color: var(--c-text);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    padding: 4px 8px;
-    border-radius: var(--r-sm);
-  }
-  .card-area {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     color: var(--c-primary);
-    letter-spacing: 0.04em;
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
   }
   .card-title {
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.4;
-    min-height: calc(1.4em * 2);
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.45;
     color: var(--c-text);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-
-  /* Stretched link */
   .card-title__link {
     color: var(--c-text) !important;
     text-decoration: none;
@@ -350,97 +319,119 @@ const detailUrl = event.slug
     content: '';
     position: absolute;
     inset: 0;
-    z-index: 0;
+    z-index: 2;
   }
 
   /* ─── Meta ─── */
   .card-meta {
-    margin: 0;
+    margin: 2px 0 0;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
   }
   .card-meta__item {
     display: flex;
     align-items: flex-start;
     gap: 6px;
     margin: 0;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--c-muted);
-    line-height: 1.4;
+    line-height: 1.45;
+    min-width: 0;
   }
-  .card-price-text {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+  .card-meta__text {
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-area {
+    font-weight: 700;
+    color: #334155;
+  }
+  .card-meta__sep {
+    margin: 0 4px;
+    color: #94A3B8;
   }
   .meta-icon {
     width: 14px;
     height: 14px;
     flex-shrink: 0;
-    margin-top: 1px;
-    color: var(--c-muted);
+    margin-top: 2px;
+    color: #94A3B8;
+  }
+
+  /* ─── Tags ─── */
+  .card-attrs {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .tag {
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 5px 8px;
+    border-radius: 999px;
+    color: #334155;
+    background: #F1F5F9;
+  }
+  .tag--free {
+    color: #3F6212;
+    background: #ECFCCB;
   }
 
   /* ─── Summary ─── */
   .card-summary {
-    font-size: 12px;
+    margin-top: 2px;
+    font-size: 13px;
     color: var(--c-muted);
-    line-height: 1.6;
-    min-height: calc(1.6em * 2);
+    line-height: 1.65;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  /* ─── Footer row ─── */
-  .card-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: auto;
-    padding-top: 4px;
-    gap: 8px;
-  }
-  .card-detail-hint {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--c-primary);
-  }
-
-  /* 公式リンクは stretched link より前面 */
-  .card-cta {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--c-muted) !important;
-    border: 1px solid var(--c-border);
-    padding: 5px 10px;
-    border-radius: var(--r-sm);
-    white-space: nowrap;
-    position: relative;
-    z-index: 1;
-    transition: border-color 0.15s, color 0.15s;
-    flex-shrink: 0;
-  }
-  .card-cta:hover {
-    border-color: var(--c-primary);
-    color: var(--c-primary) !important;
-  }
-  .card-cta svg { width: 11px; height: 11px; }
-
-  @media (max-width: 480px) {
+  /* ─── SP: 横並びのコンパクトカード（一覧を速く流し見できるように） ─── */
+  @media (max-width: 599px) {
+    .event-card {
+      flex-direction: row;
+      height: auto;
+      border-radius: 14px;
+    }
+    .event-card--linked:hover { transform: none; }
+    .card-image {
+      width: 112px;
+      aspect-ratio: auto;
+      align-self: stretch;
+      min-height: 128px;
+    }
+    .card-status {
+      top: 6px;
+      left: 6px;
+      font-size: 10px;
+      padding: 4px 6px;
+    }
+    .card-status--today::before { display: none; }
+    .card-image__concept {
+      right: 4px;
+      bottom: 4px;
+      font-size: 9px;
+      padding: 3px 4px;
+    }
     .card-body {
-      gap: 6px;
-      padding: 12px;
+      padding: 10px 12px 12px;
+      gap: 5px;
     }
-    .card-title {
-      font-size: 14px;
-    }
+    .card-when { font-size: 12px; }
+    .card-title { font-size: 14.5px; line-height: 1.4; }
+    .card-meta__item { font-size: 12px; }
+    .card-summary { display: none; }
+    .tag { font-size: 10.5px; padding: 4px 7px; }
   }
 
   /* ─── Accessibility ─── */

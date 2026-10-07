@@ -166,6 +166,15 @@ const hreflangAlternates =
       ]
     : []
 
+const sourceHost = (() => {
+  if (!event?.source_url) return null
+  try {
+    return new URL(event.source_url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+})()
+
 const pageUrl = jaPath ? absoluteSiteUrl(jaPath, Astro.site) : null
 const shareImage = displayImage?.src
   ? absoluteSiteUrl(displayImage.src, Astro.site)
@@ -232,6 +241,7 @@ const jsonLd =
                     'tag',
                     chip.id === 'status' && scheduleStatus === 'ended' && 'tag--ended',
                     chip.id === 'status' && scheduleStatus === 'today' && 'tag--today',
+                    chip.id === 'price' && event.price_type === 'free' && 'tag--free',
                   ]}
                 >
                   {chip.label}
@@ -341,6 +351,40 @@ const jsonLd =
           </section>
         )}
 
+        {(event.official_url || event.source_url) && (
+          <div class="event-cta">
+            {event.official_url && (
+              <a
+                href={event.official_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-primary"
+              >
+                公式サイトで詳細を見る
+                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                </svg>
+              </a>
+            )}
+            {event.source_url && (
+              <p class="event-source">
+                情報元:{' '}
+                <a
+                  href={event.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {sourceHost ?? event.source_url}
+                </a>
+                <span class="event-source__note">
+                  最新情報は公式サイトでご確認ください
+                </span>
+              </p>
+            )}
+          </div>
+        )}
+
         {event.summary && (
           <section class="event-body">
             <h2 class="event-section-heading">イベント概要</h2>
@@ -354,31 +398,6 @@ const jsonLd =
 
         {reactionSummary && <EventReactionSummary summary={reactionSummary} />}
 
-        {event.official_url && (
-          <div class="event-cta">
-            <a
-              href={event.official_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="btn-primary"
-            >
-              公式サイトで詳細を見る →
-            </a>
-          </div>
-        )}
-
-        {event.source_url && (
-          <p class="event-source">
-            情報元:{' '}
-            <a
-              href={event.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {event.source_url}
-            </a>
-          </p>
-        )}
 
         <section class="organizer-note" aria-labelledby="organizer-note-heading">
           <h2 id="organizer-note-heading" class="organizer-note__heading">
@@ -469,13 +488,18 @@ const jsonLd =
     gap: 6px;
   }
   .tag {
-    background: var(--c-accent);
-    color: var(--c-text);
+    background: #F1F5F9;
+    color: #334155;
     font-size: 12px;
     font-weight: 700;
-    padding: 4px 10px;
-    border-radius: var(--r-sm);
+    line-height: 1;
+    padding: 7px 11px;
+    border-radius: 999px;
     letter-spacing: 0.02em;
+  }
+  .tag--free {
+    background: #ECFCCB;
+    color: #3F6212;
   }
   .tag--today {
     background: var(--c-primary);
@@ -492,7 +516,8 @@ const jsonLd =
     letter-spacing: 0.02em;
   }
   .event-title {
-    font-size: clamp(22px, 5vw, 40px);
+    text-wrap: pretty;
+    font-size: clamp(22px, 4.2vw, 34px);
     font-weight: 800;
     letter-spacing: -0.4px;
     line-height: 1.3;
@@ -606,7 +631,6 @@ const jsonLd =
     font-size: 14px;
     line-height: 1.5;
   }
-  }
   .event-meta__reservation {
     display: flex;
     flex-direction: column;
@@ -637,34 +661,45 @@ const jsonLd =
   }
 
   .event-cta {
-    padding-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+    border-radius: var(--r-md);
+    background: var(--c-white);
+    border: 1px solid var(--c-border);
   }
   .btn-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+    height: 52px;
+    padding: 0 24px;
     background: var(--c-primary);
     color: var(--c-white) !important;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
-    padding: 14px 24px;
-    border-radius: var(--r-lg);
-    text-align: center;
-    transition: background 0.15s;
+    border-radius: 999px;
+    box-shadow: 0 6px 16px rgba(0, 119, 200, 0.22);
+    transition: background 0.15s, transform 0.15s;
   }
+  .btn-primary svg { width: 16px; height: 16px; }
   .btn-primary:hover {
     background: var(--c-primary-dk);
+    transform: translateY(-1px);
   }
 
   .event-source {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px 10px;
     font-size: 12px;
     color: var(--c-muted);
     line-height: 1.5;
-    overflow-wrap: anywhere;
-    margin-top: -8px;
+    text-align: center;
   }
   .event-source a {
     color: var(--c-muted);
@@ -726,10 +761,5 @@ const jsonLd =
     color: var(--c-muted);
   }
 
-  @media (min-width: 640px) {
-    .btn-primary {
-      width: auto;
-      min-width: 280px;
-    }
-  }
+
 </style>

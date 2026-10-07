@@ -1,13 +1,14 @@
 ---
 import Layout from '../layouts/Layout.astro'
-import EventCardGroups from '../components/EventCardGroups.astro'
+import EventExplorer from '../components/EventExplorer.astro'
 import { getPublishedEvents } from '../lib/events'
-import SeekigoLogo from '../components/brand/SeekigoLogo.astro'
 
 const events = await getPublishedEvents()
+
 ---
 
 <Layout
+  hideNavOnMobile
   title="Seekigo（シーキゴ）- 今日は、どこ行く？"
   description="東京のイベント・お祭り・展示・グルメ・お出かけ情報を今日・今週末・無料・子ども向けなど状況から探せるサービスです。"
 >
@@ -36,189 +37,47 @@ const events = await getPublishedEvents()
       <div class="hero__scrim" aria-hidden="true"></div>
       <div class="hero__inner inner">
         <div class="hero__copy">
-          <p class="hero__brand">
-            <SeekigoLogo size="hero" />
+          <p class="hero__eyebrow">
+            <span class="hero__dot" aria-hidden="true"></span>
+            東京のイベント・おでかけ情報
           </p>
-          <h1 class="hero__headline">探して、行く。</h1>
-          <p class="hero__lead">
-            今日どこ行こう？<br />
-            今週末何しよう？
-          </p>
+          <h1 class="hero__headline">
+            今日は、<br class="br-sp" />どこ行く？
+          </h1>
           <p class="hero__sub">
-            東京のイベント・おでかけ情報を、<br class="br-sp" />
-            今の気分から探せます。
+            お祭り・展示・マルシェ・体験イベントを、<br />
+            いまの気分から探せます。
           </p>
           <div class="hero-cta">
-            <a class="hero-cta__primary" href="/tokyo/today/">今日のイベントを見る</a>
-            <a class="hero-cta__secondary" href="/tokyo/this-weekend/">今週末を探す</a>
+            <a class="hero-cta__primary" href="/?mood=today#events" data-mood-link="today">
+              今日のイベントを見る
+              <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v9.586l3.293-3.293a1 1 0 111.414 1.414l-5 5a1 1 0 01-1.414 0l-5-5a1 1 0 111.414-1.414L9 13.586V4a1 1 0 011-1z" clip-rule="evenodd" />
+              </svg>
+            </a>
+            <p class="hero__stat">
+              いま掲載中 <strong>{events.length}</strong> 件
+            </p>
           </div>
-        </div>
-
-        <div class="chips" id="situation-chips" role="group" aria-label="状況を選ぶ">
-          <button class="chip" data-filter="today">今日</button>
-          <button class="chip" data-filter="weekend">今週末</button>
-          <button class="chip" data-filter="free">無料</button>
-          <button class="chip" data-filter="kids">子どもと</button>
-          <button class="chip" data-filter="indoor">雨の日</button>
-          <button class="chip" data-filter="night">夜</button>
-          <button class="chip chip--ghost" data-filter="all">すべて</button>
         </div>
       </div>
     </section>
 
-    <!-- ─── Events ─── -->
-    <section class="events">
-      <div class="inner">
-        <p class="events__count" id="events-count" aria-live="polite">
-          東京のイベント {events.length}件
-        </p>
-
-        {events && events.length > 0 ? (
-          <div id="card-grid">
-            <EventCardGroups events={events} />
-          </div>
-        ) : (
-          <p class="empty-state">現在掲載中のイベントはありません。</p>
-        )}
-
-        <p class="empty-state hidden" id="no-results" aria-live="polite">
-          この条件に合うイベントは現在ありません。<br />
-          <button class="link-btn" id="show-all-btn">すべてのイベントを見る</button>
-        </p>
-      </div>
-    </section>
-
+    <EventExplorer events={events} overlapHero />
   </main>
 </Layout>
-
-<script>
-  function jstDateStr(d: Date): string {
-    return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
-  }
-
-  function getToday(): string {
-    return jstDateStr(new Date())
-  }
-
-  function getWeekendDates(): string[] {
-    const now = new Date()
-    const jst = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
-    const day = jst.getDay()
-    const dates: string[] = []
-
-    if (day === 0) {
-      dates.push(jstDateStr(now))
-    } else if (day === 6) {
-      dates.push(jstDateStr(now))
-      const sun = new Date(now)
-      sun.setDate(now.getDate() + 1)
-      dates.push(jstDateStr(sun))
-    } else {
-      const daysToSat = 6 - day
-      const sat = new Date(now)
-      sat.setDate(now.getDate() + daysToSat)
-      const sun = new Date(sat)
-      sun.setDate(sat.getDate() + 1)
-      dates.push(jstDateStr(sat))
-      dates.push(jstDateStr(sun))
-    }
-    return dates
-  }
-
-  function isOnDate(card: HTMLElement, targetDate: string): boolean {
-    const raw = card.dataset.spans ?? ''
-    if (!raw) return false
-    return raw.split(',').some((part) => {
-      const [start, end] = part.split('/')
-      if (!start) return false
-      return start <= targetDate && targetDate <= (end || start)
-    })
-  }
-
-  function getDefaultFilter(): string {
-    const jst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
-    const day  = jst.getDay()
-    const hour = jst.getHours()
-    if ((day === 5 && hour >= 18) || day === 6 || day === 0) return 'weekend'
-    return 'today'
-  }
-
-  const chips   = document.querySelectorAll<HTMLButtonElement>('.chip')
-  const cards   = document.querySelectorAll<HTMLElement>('.event-card')
-  const countEl = document.getElementById('events-count')
-  const noRes   = document.getElementById('no-results')
-  const showAll = document.getElementById('show-all-btn')
-
-  const LABELS: Record<string, string> = {
-    today:   '今日のイベント',
-    weekend: '今週末のイベント',
-    free:    '無料イベント',
-    kids:    '子ども向けイベント',
-    indoor:  '雨の日もOK（屋内）',
-    night:   '夜のイベント',
-    all:     '東京のイベント',
-  }
-
-  function filterCards(filter: string) {
-    const today       = getToday()
-    const weekendDays = getWeekendDates()
-    let visible = 0
-
-    cards.forEach(card => {
-      let show = false
-      switch (filter) {
-        case 'today':   show = isOnDate(card, today); break
-        case 'weekend': show = weekendDays.some(d => isOnDate(card, d)); break
-        case 'free':    show = card.dataset.free   === 'true'; break
-        case 'kids':    show = card.dataset.kids   === 'true'; break
-        case 'indoor':  show = card.dataset.indoor === 'true'; break
-        case 'night':   show = card.dataset.night  === 'true'; break
-        default:        show = true
-      }
-      card.style.display = show ? '' : 'none'
-      if (show) visible++
-    })
-
-    document.querySelectorAll<HTMLElement>('.event-group').forEach((group) => {
-      const any = [...group.querySelectorAll<HTMLElement>('.event-card')].some(
-        (card) => card.style.display !== 'none',
-      )
-      group.hidden = !any
-    })
-
-    if (countEl) countEl.textContent = `${LABELS[filter] ?? 'イベント'} ${visible}件`
-    const isEmpty = visible === 0
-    noRes?.classList.toggle('hidden', !isEmpty)
-    document.getElementById('card-grid')?.classList.toggle('hidden', isEmpty)
-  }
-
-  function setActiveChip(filter: string) {
-    chips.forEach(chip =>
-      chip.classList.toggle('chip--active', chip.dataset.filter === filter)
-    )
-    filterCards(filter)
-  }
-
-  chips.forEach(chip =>
-    chip.addEventListener('click', () => setActiveChip(chip.dataset.filter ?? 'all'))
-  )
-  showAll?.addEventListener('click', () => setActiveChip('all'))
-
-  setActiveChip(getDefaultFilter())
-</script>
 
 <style>
   /* ─── Hero ─── */
   .hero {
     position: relative;
     isolation: isolate;
-    background: var(--c-navy, #0b1f3a);
-    border-bottom: 1px solid var(--c-border);
-    padding: 56px 0 48px;
+    background: #EAF6FF;
     overflow: hidden;
-    min-height: min(72vh, 640px);
+    min-height: clamp(420px, 58vh, 560px);
     display: flex;
-    align-items: flex-end;
+    align-items: center;
+    padding: 56px 0 88px;
   }
   .hero__media {
     position: absolute;
@@ -233,218 +92,125 @@ const events = await getPublishedEvents()
   }
   .hero__img {
     object-fit: cover;
-    object-position: center;
+    object-position: 70% center;
   }
   .hero__scrim {
     position: absolute;
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background:
-      linear-gradient(
-        180deg,
-        rgba(255, 255, 255, 0.72) 0%,
-        rgba(255, 255, 255, 0.55) 42%,
-        rgba(255, 255, 255, 0.28) 100%
-      );
+    background: linear-gradient(
+      90deg,
+      rgba(248, 250, 252, 0.96) 0%,
+      rgba(248, 250, 252, 0.86) 36%,
+      rgba(248, 250, 252, 0.2) 62%,
+      rgba(248, 250, 252, 0) 100%
+    );
   }
   .hero__inner {
     position: relative;
     z-index: 1;
+    width: 100%;
+  }
+  .hero__copy {
+    max-width: 34rem;
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    width: 100%;
+    gap: 18px;
   }
   .br-sp { display: none; }
 
-  .hero__brand {
-    line-height: 1;
+  .hero__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 119, 200, 0.18);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--c-primary);
+  }
+  .hero__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--c-lime);
+    box-shadow: 0 0 0 3px rgba(163, 230, 53, 0.3);
   }
   .hero__headline {
-    font-size: clamp(26px, 4.6vw, 40px);
+    font-size: clamp(36px, 5.6vw, 60px);
     font-weight: 800;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
     color: var(--c-navy);
-  }
-  .hero__lead {
-    font-size: clamp(16px, 2.4vw, 20px);
-    font-weight: 600;
-    color: var(--c-navy);
-    line-height: 1.55;
   }
   .hero__sub {
-    font-size: 16px;
-    color: var(--c-muted);
-    line-height: 1.7;
+    font-size: clamp(15px, 1.6vw, 17px);
+    color: #3B4A5C;
+    line-height: 1.85;
   }
   .hero-cta {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    align-items: center;
+    gap: 12px 20px;
     margin-top: 4px;
   }
-  .hero-cta__primary,
-  .hero-cta__secondary {
+  .hero-cta__primary {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    flex: 0 1 auto;
-    font-size: 15px;
+    gap: 8px;
+    height: 52px;
+    padding: 0 26px;
+    border-radius: 999px;
+    background: var(--c-primary);
+    color: #fff !important;
+    font-size: 16px;
     font-weight: 700;
-    padding: 12px 22px;
-    border-radius: var(--r-lg);
-    line-height: 1;
-    white-space: nowrap;
-    text-decoration: none !important;
-    transition: background 0.15s, color 0.15s, transform 0.1s;
+    box-shadow: 0 8px 20px rgba(0, 119, 200, 0.28);
+    transition: background 0.15s, transform 0.15s;
   }
-  .hero-cta__primary {
-    background: var(--c-cyan);
-    color: var(--c-white) !important;
-  }
+  .hero-cta__primary svg { width: 18px; height: 18px; }
   .hero-cta__primary:hover {
     background: var(--c-primary-dk);
-    color: var(--c-white) !important;
     transform: translateY(-1px);
   }
-  .hero-cta__secondary {
-    background: rgba(255, 255, 255, 0.72);
-    color: var(--c-navy) !important;
-    border: 2px solid var(--c-navy);
+  .hero__stat {
+    font-size: 14px;
+    color: var(--c-muted);
   }
-  .hero-cta__secondary:hover {
-    background: var(--c-navy);
-    color: var(--c-white) !important;
-  }
-
-  @media (min-width: 720px) {
-    .hero {
-      align-items: center;
-      min-height: min(78vh, 720px);
-      padding: 64px 0 56px;
-    }
-    .hero__scrim {
-      background:
-        linear-gradient(
-          90deg,
-          rgba(255, 255, 255, 0.88) 0%,
-          rgba(255, 255, 255, 0.72) 34%,
-          rgba(255, 255, 255, 0.28) 58%,
-          rgba(255, 255, 255, 0.08) 100%
-        );
-    }
-    .hero__copy {
-      max-width: min(58%, 34rem);
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .hero {
-      padding: 72px 0 64px;
-      min-height: min(82vh, 780px);
-    }
-    .hero__copy {
-      max-width: min(52%, 36rem);
-    }
+  .hero__stat strong {
+    font-size: 18px;
+    color: var(--c-navy);
+    font-variant-numeric: tabular-nums;
   }
 
   @media (max-width: 719px) {
     .hero {
-      padding: 40px 0 36px;
-      min-height: min(70vh, 560px);
+      min-height: 0;
+      align-items: flex-start;
+      padding: 32px 0 76px;
     }
-    .hero__inner {
-      gap: 12px;
+    .hero__img { object-position: center 80%; }
+    .hero__scrim {
+      background: linear-gradient(
+        180deg,
+        rgba(248, 250, 252, 0.97) 0%,
+        rgba(248, 250, 252, 0.9) 55%,
+        rgba(248, 250, 252, 0.55) 100%
+      );
     }
-    .hero-cta__primary,
-    .hero-cta__secondary {
-      font-size: 14px;
-      padding: 11px 16px;
-    }
-  }
-
-  /* ─── Chips ─── */
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 8px;
-  }
-  .chip {
-    appearance: none;
-    border: 2px solid var(--c-primary);
-    background: rgba(255, 255, 255, 0.82);
-    color: var(--c-primary);
-    font-family: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    padding: 10px 22px;
-    border-radius: var(--r-lg);
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s, transform 0.1s;
-    white-space: nowrap;
-    line-height: 1;
-  }
-  .chip:hover { background: #EFF6FF; transform: translateY(-1px); }
-  .chip--active { background: var(--c-primary); color: var(--c-white); }
-  .chip--active:hover { background: var(--c-primary-dk); }
-  .chip--ghost { border-color: var(--c-border); color: var(--c-muted); }
-  .chip--ghost:hover { background: var(--c-bg); }
-  .chip--ghost.chip--active {
-    background: var(--c-text);
-    border-color: var(--c-text);
-    color: var(--c-white);
-  }
-
-  /* ─── Events ─── */
-  .events { padding: 40px 0 0; }
-  .events__count {
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    color: var(--c-text);
-    margin-bottom: 24px;
-    min-height: 28px;
-  }
-
-  /* ─── States ─── */
-  .hidden { display: none !important; }
-  .empty-state {
-    padding: 48px 0;
-    text-align: center;
-    color: var(--c-muted);
-    font-size: 15px;
-    line-height: 1.8;
-  }
-  .link-btn {
-    appearance: none;
-    background: none;
-    border: none;
-    padding: 0;
-    font-family: inherit;
-    font-size: inherit;
-    color: var(--c-primary);
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: underline;
-  }
-
-  /* ─── Responsive ─── */
-  @media (max-width: 480px) {
+    .hero__copy { gap: 14px; }
     .br-sp { display: inline; }
-    .chip { font-size: 14px; padding: 9px 16px; }
-  }
-
-  /* 極小のみ縦積み。横並び折り返しより自然 */
-  @media (max-width: 419px) {
-    .hero-cta {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    .hero-cta__primary,
-    .hero-cta__secondary {
+    .br-pc { display: none; }
+    .hero-cta__primary {
       width: 100%;
+      justify-content: center;
+      height: 50px;
+      font-size: 15px;
     }
   }
 </style>

@@ -44,6 +44,7 @@ const {
 } = Astro.props
 
 const count = events.length
+const PAGE_SIZE = 24
 ---
 
 <main class="list-page">
@@ -66,9 +67,18 @@ const count = events.length
       {count > 0 ? (
         <>
           <p class="list-events__count">
-            {countLabel} {count}件
+            {countLabel}<span class="list-events__num">{count}</span>件
           </p>
-          <EventCardGroups events={events} />
+          <div id="list-cards">
+            <EventCardGroups events={events} />
+          </div>
+          {count > PAGE_SIZE && (
+            <div class="list-more">
+              <button type="button" class="list-more__btn" id="list-more">
+                もっと見る（あと{count - PAGE_SIZE}件）
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <div class="list-empty">
@@ -88,11 +98,66 @@ const count = events.length
   </section>
 </main>
 
+<script>
+  const PAGE_SIZE = 24
+  const cards = [...document.querySelectorAll<HTMLElement>('#list-cards .event-card')]
+  const btn = document.getElementById('list-more')
+  let limit = PAGE_SIZE
+
+  function render() {
+    cards.forEach((card, i) => {
+      card.hidden = i >= limit
+    })
+    document.querySelectorAll<HTMLElement>('#list-cards .event-group').forEach((group) => {
+      group.hidden = ![...group.querySelectorAll<HTMLElement>('.event-card')].some((c) => !c.hidden)
+    })
+    const rest = cards.length - Math.min(limit, cards.length)
+    if (btn) {
+      btn.parentElement!.hidden = rest <= 0
+      btn.textContent = `もっと見る（あと${rest}件）`
+    }
+  }
+
+  btn?.addEventListener('click', () => {
+    const first = cards[limit]
+    limit += PAGE_SIZE
+    render()
+    first?.querySelector<HTMLAnchorElement>('a')?.focus({ preventScroll: true })
+  })
+  render()
+</script>
+
 <style>
+  .list-more {
+    display: flex;
+    justify-content: center;
+    margin-top: 40px;
+  }
+  .list-more[hidden] { display: none; }
+  .list-more__btn {
+    appearance: none;
+    min-width: 240px;
+    height: 48px;
+    padding: 0 28px;
+    border: 1.5px solid var(--c-navy);
+    border-radius: 999px;
+    background: var(--c-white);
+    color: var(--c-navy);
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .list-more__btn:hover {
+    background: var(--c-navy);
+    color: #fff;
+  }
+
   .list-hero {
     background: var(--c-white);
     border-bottom: 1px solid var(--c-border);
-    padding: 48px 0 40px;
+    padding: 32px 0 28px;
   }
 
   .list-breadcrumb {
@@ -105,7 +170,7 @@ const count = events.length
     margin-bottom: 16px;
   }
   .list-breadcrumb a {
-    color: var(--c-primary);
+    color: var(--c-muted);
   }
   .list-breadcrumb a:hover {
     text-decoration: underline;
@@ -123,7 +188,7 @@ const count = events.length
     margin-bottom: 12px;
   }
   .list-hero__headline {
-    font-size: clamp(28px, 5vw, 40px);
+    font-size: clamp(26px, 4vw, 36px);
     font-weight: 800;
     letter-spacing: -0.5px;
     color: var(--c-text);
@@ -147,6 +212,12 @@ const count = events.length
     color: var(--c-text);
     margin-bottom: 24px;
     min-height: 28px;
+  }
+
+  .list-events__num {
+    margin-left: 6px;
+    color: var(--c-primary);
+    font-variant-numeric: tabular-nums;
   }
 
   .list-empty {

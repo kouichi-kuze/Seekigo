@@ -1,0 +1,442 @@
+---
+/**
+ * TOP / 東京一覧で共通の「気分で絞り込む」イベント一覧。
+ * - チップはツールバーとして sticky 表示（スクロールしても切り替えられる）
+ * - ?mood=free のように URL に状態を残す（戻る・共有で同じ絞り込み）
+ * - 一度に全件を描画しても、表示は PAGE_SIZE 件ずつ「もっと見る」で増やす
+ */
+import EventCardGroups from './EventCardGroups.astro'
+import type { Event } from '../lib/events'
+
+interface Props {
+  events: Event[]
+  /** ツールバーをヒーローに重ねる（TOP 用） */
+  overlapHero?: boolean
+}
+
+const { events, overlapHero = false } = Astro.props
+
+const moods = [
+  { id: 'today', label: '今日' },
+  { id: 'weekend', label: '今週末' },
+  { id: 'free', label: '無料' },
+  { id: 'kids', label: '子どもと' },
+  { id: 'indoor', label: '雨の日' },
+  { id: 'night', label: '夜' },
+  { id: 'all', label: 'すべて' },
+]
+---
+
+<section
+  class:list={['explorer', overlapHero && 'explorer--overlap']}
+  id="events"
+  aria-labelledby="events-count"
+>
+  <div class="explorer__sentinel" aria-hidden="true"></div>
+  <div class="explorer__bar">
+    <div class="inner">
+      <div class="explorer__bar-card">
+        <p class="explorer__bar-label" id="mood-label">気分で探す</p>
+        <div class="chips" role="group" aria-labelledby="mood-label">
+          {
+            moods.map((mood) => (
+              <button
+                type="button"
+                class="chip"
+                data-filter={mood.id}
+                aria-pressed="false"
+              >
+                {mood.label}
+              </button>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="inner">
+    <div class="explorer__head">
+      <h2 class="explorer__count" id="events-count" aria-live="polite">
+        東京のイベント <span class="explorer__num">{events.length}</span>件
+      </h2>
+      <p class="explorer__hint" id="events-hint"></p>
+    </div>
+
+    {
+      events.length > 0 ? (
+        <div id="card-grid">
+          <EventCardGroups events={events} />
+        </div>
+      ) : (
+        <p class="empty-state">現在掲載中のイベントはありません。</p>
+      )
+    }
+
+    <div class="explorer__more hidden" id="load-more-wrap">
+      <button type="button" class="more-btn" id="load-more">
+        もっと見る
+      </button>
+    </div>
+
+    <div class="empty-state hidden" id="no-results" aria-live="polite">
+      <p>この条件に合うイベントは、いまのところありません。</p>
+      <button type="button" class="more-btn" id="show-all-btn">
+        すべてのイベントを見る
+      </button>
+    </div>
+  </div>
+</section>
+
+<script>
+  const PAGE_SIZE = 24
+
+  function jstDateStr(d: Date): string {
+    return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+  }
+
+  function getWeekendDates(): string[] {
+    const now = new Date()
+    const jst = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
+    const day = jst.getDay()
+    const dates: string[] = []
+    if (day === 0) {
+      dates.push(jstDateStr(now))
+    } else if (day === 6) {
+      dates.push(jstDateStr(now))
+      const sun = new Date(now)
+      sun.setDate(now.getDate() + 1)
+      dates.push(jstDateStr(sun))
+    } else {
+      const sat = new Date(now)
+      sat.setDate(now.getDate() + (6 - day))
+      const sun = new Date(sat)
+      sun.setDate(sat.getDate() + 1)
+      dates.push(jstDateStr(sat), jstDateStr(sun))
+    }
+    return dates
+  }
+
+  function isOnDate(card: HTMLElement, target: string): boolean {
+    const raw = card.dataset.spans ?? ''
+    if (!raw) return false
+    return raw.split(',').some((part) => {
+      const [start, end] = part.split('/')
+      if (!start) return false
+      return start <= target && target <= (end || start)
+    })
+  }
+
+  function getDefaultFilter(): string {
+    const jst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
+    const day = jst.getDay()
+    const hour = jst.getHours()
+    if ((day === 5 && hour >= 18) || day === 6 || day === 0) return 'weekend'
+    return 'today'
+  }
+
+  const LABELS: Record<string, string> = {
+    today: '今日行けるイベント',
+    weekend: '今週末のイベント',
+    free: '無料で楽しめるイベント',
+    kids: '子どもと行けるイベント',
+    indoor: '雨の日もOK（屋内）',
+    night: '夜から行けるイベント',
+    all: '東京のイベント',
+  }
+  const HINTS: Record<string, string> = {
+    today: '本日開催中のものだけを表示しています。',
+    weekend: '土日のどちらかに開催しているイベントです。',
+    free: '入場無料・一部無料のイベントです。',
+    kids: '子ども向けの内容があるイベントです。',
+    indoor: '屋内で楽しめるイベントです。',
+    night: '夜の時間帯に楽しめるイベントです。',
+    all: '開催中・開催予定のイベントをすべて表示しています。',
+  }
+
+  const root = document.getElementById('events')
+  const chips = root?.querySelectorAll<HTMLButtonElement>('.chip') ?? []
+  const cards = [...(root?.querySelectorAll<HTMLElement>('.event-card') ?? [])]
+  const countEl = document.getElementById('events-count')
+  const hintEl = document.getElementById('events-hint')
+  const noRes = document.getElementById('no-results')
+  const grid = document.getElementById('card-grid')
+  const moreWrap = document.getElementById('load-more-wrap')
+  const moreBtn = document.getElementById('load-more')
+  const showAll = document.getElementById('show-all-btn')
+
+  let current = 'all'
+  let limit = PAGE_SIZE
+  let matched: HTMLElement[] = []
+
+  function matches(card: HTMLElement, filter: string, today: string, weekend: string[]) {
+    switch (filter) {
+      case 'today': return isOnDate(card, today)
+      case 'weekend': return weekend.some((d) => isOnDate(card, d))
+      case 'free': return card.dataset.free === 'true'
+      case 'kids': return card.dataset.kids === 'true'
+      case 'indoor': return card.dataset.indoor === 'true'
+      case 'night': return card.dataset.night === 'true'
+      default: return true
+    }
+  }
+
+  function render() {
+    const visibleSet = new Set(matched.slice(0, limit))
+    cards.forEach((card) => {
+      card.hidden = !visibleSet.has(card)
+    })
+    document.querySelectorAll<HTMLElement>('#events .event-group').forEach((group) => {
+      group.hidden = ![...group.querySelectorAll<HTMLElement>('.event-card')].some(
+        (card) => !card.hidden,
+      )
+    })
+    const rest = matched.length - Math.min(limit, matched.length)
+    moreWrap?.classList.toggle('hidden', rest <= 0)
+    if (moreBtn) moreBtn.textContent = `もっと見る（あと${rest}件）`
+  }
+
+  function applyFilter(
+    filter: string,
+    opts: { scroll?: boolean; push?: boolean; force?: boolean } = {},
+  ) {
+    current = LABELS[filter] ? filter : 'all'
+    limit = PAGE_SIZE
+    const today = jstDateStr(new Date())
+    const weekend = getWeekendDates()
+    matched = cards.filter((card) => matches(card, current, today, weekend))
+
+    chips.forEach((chip) => {
+      const on = chip.dataset.filter === current
+      chip.classList.toggle('chip--active', on)
+      chip.setAttribute('aria-pressed', on ? 'true' : 'false')
+    })
+
+    if (countEl) {
+      countEl.innerHTML = `${LABELS[current]} <span class="explorer__num">${matched.length}</span>件`
+    }
+    if (hintEl) hintEl.textContent = HINTS[current] ?? ''
+
+    const isEmpty = matched.length === 0
+    noRes?.classList.toggle('hidden', !isEmpty)
+    grid?.classList.toggle('hidden', isEmpty)
+    render()
+
+    if (opts.push) {
+      const url = new URL(location.href)
+      url.searchParams.set('mood', current)
+      history.replaceState(null, '', url)
+    }
+    if (opts.scroll && root) {
+      const header = document.querySelector<HTMLElement>('.site-header')
+      const offset = (header?.offsetHeight ?? 0) + 8
+      const top = root.getBoundingClientRect().top + window.scrollY - offset
+      if (opts.force || window.scrollY > top || root.getBoundingClientRect().top > window.innerHeight * 0.6) {
+        window.scrollTo({ top, behavior: 'smooth' })
+      }
+    }
+  }
+
+  chips.forEach((chip) =>
+    chip.addEventListener('click', () =>
+      applyFilter(chip.dataset.filter ?? 'all', { scroll: true, push: true }),
+    ),
+  )
+  document.querySelectorAll<HTMLAnchorElement>('[data-mood-link]').forEach((link) =>
+    link.addEventListener('click', (e) => {
+      e.preventDefault()
+      applyFilter(link.dataset.moodLink ?? 'all', { scroll: true, push: true, force: true })
+    }),
+  )
+  showAll?.addEventListener('click', () => applyFilter('all', { scroll: true, push: true }))
+  moreBtn?.addEventListener('click', () => {
+    const firstNew = matched[limit]
+    limit += PAGE_SIZE
+    render()
+    firstNew?.querySelector<HTMLAnchorElement>('a')?.focus({ preventScroll: true })
+  })
+
+  // 固定表示中だけ背景を敷いて、下を流れるカードと重ならないようにする
+  const sentinel = root?.querySelector<HTMLElement>('.explorer__sentinel')
+  const bar = root?.querySelector<HTMLElement>('.explorer__bar')
+  if (sentinel && bar && 'IntersectionObserver' in window) {
+    const headerH = document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 60
+    new IntersectionObserver(
+      ([entry]) => bar.classList.toggle('is-stuck', !entry.isIntersecting),
+      { rootMargin: `-${headerH + 1}px 0px 0px 0px` },
+    ).observe(sentinel)
+  }
+
+  const fromUrl = new URL(location.href).searchParams.get('mood')
+  applyFilter(fromUrl && LABELS[fromUrl] ? fromUrl : getDefaultFilter())
+</script>
+
+<style>
+  .explorer {
+    padding-bottom: 8px;
+  }
+
+  /* ─── Sticky mood bar ─── */
+  .explorer__bar {
+    position: sticky;
+    top: var(--header-h, 60px);
+    z-index: 50;
+    padding: 12px 0;
+    pointer-events: none;
+  }
+  .explorer__bar-card {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 12px 10px 18px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--c-border);
+    border-radius: 18px;
+    box-shadow: 0 8px 24px rgba(14, 39, 68, 0.08);
+  }
+  .explorer__sentinel { height: 1px; }
+  .explorer--overlap .explorer__sentinel { margin-top: -41px; }
+  .explorer__bar {
+    transition: background 0.2s;
+  }
+  .explorer__bar.is-stuck {
+    background: linear-gradient(180deg, var(--c-bg) 0 75%, rgba(248, 250, 252, 0));
+  }
+  .explorer__bar-label {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--c-navy);
+    letter-spacing: 0.02em;
+  }
+
+  .chips {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 2px;
+  }
+  .chips::-webkit-scrollbar { display: none; }
+
+  .chip {
+    appearance: none;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 16px;
+    border: 1px solid var(--c-border);
+    border-radius: 999px;
+    background: var(--c-white);
+    color: var(--c-text);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .chip:hover {
+    border-color: var(--c-primary);
+    color: var(--c-primary);
+  }
+  .chip--active,
+  .chip--active:hover {
+    background: var(--c-navy);
+    border-color: var(--c-navy);
+    color: #fff;
+  }
+
+  /* ─── Head ─── */
+  .explorer__head {
+    margin: 20px 0 24px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 16px;
+  }
+  .explorer__count {
+    font-size: clamp(20px, 2.6vw, 26px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: var(--c-text);
+  }
+  .explorer__count :global(.explorer__num) {
+    color: var(--c-primary);
+    margin-left: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .explorer__hint {
+    font-size: 13px;
+    color: var(--c-muted);
+  }
+
+  /* ─── More / empty ─── */
+  .explorer__more {
+    display: flex;
+    justify-content: center;
+    margin-top: 40px;
+  }
+  .more-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 240px;
+    height: 48px;
+    padding: 0 28px;
+    border: 1.5px solid var(--c-navy);
+    border-radius: 999px;
+    background: var(--c-white);
+    color: var(--c-navy);
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .more-btn:hover {
+    background: var(--c-navy);
+    color: #fff;
+  }
+
+  .hidden { display: none !important; }
+  .empty-state {
+    padding: 56px 0;
+    text-align: center;
+    color: var(--c-muted);
+    font-size: 15px;
+    line-height: 1.8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  @media (max-width: 899px) {
+    .explorer__bar { padding: 8px 0; }
+    .explorer__bar-card {
+      padding: 8px;
+      border-radius: 16px;
+    }
+    .explorer__bar-label { display: none; }
+    .explorer--overlap .explorer__sentinel { margin-top: -33px; }
+    .chips {
+      mask-image: linear-gradient(90deg, #000 88%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+      padding-right: 24px;
+    }
+    .chip {
+      height: 36px;
+      padding: 0 14px;
+      font-size: 13px;
+    }
+  }
+</style>
