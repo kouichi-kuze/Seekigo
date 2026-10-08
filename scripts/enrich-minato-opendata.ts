@@ -31,6 +31,7 @@ import {
   enrichEventWithAi,
   type AiEnrichment,
 } from './lib/ai-enrichment'
+import { inferKidsFromAudienceText } from './lib/kids-inference'
 import type { MinatoNormalizedEvent } from './lib/minato-opendata'
 import {
   cleanAddressAccess,
@@ -237,22 +238,7 @@ function judgeIndoor(place: string): boolean | null {
 
 /** 子ども向けの明示があるときだけ true。対象外の明示があるときだけ false。 */
 function judgeKids(audience: string): boolean | null {
-  if (!audience) return null
-  if (
-    /子ども向け|子供向け|親子|児童|キッズ|未就学|幼児|乳幼児|小学生|小学[0-9０-９]|子ども|子供/.test(
-      audience,
-    )
-  ) {
-    return true
-  }
-  if (/大人限定|大人向け|成人限定|子ども不可|子供不可|未成年不可/.test(audience)) {
-    return false
-  }
-  const ages = audience.matchAll(/(\d{2})歳以上/g)
-  for (const match of ages) {
-    if (Number(match[1]) >= 18) return false
-  }
-  return null
+  return inferKidsFromAudienceText(audience)
 }
 
 /** 夜の外出先だけ true。花火や遅い閉館だけでは付けない。 */

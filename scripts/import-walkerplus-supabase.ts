@@ -312,7 +312,7 @@ function validateNewDraft(
     venue: detail.venue,
   })
   const price_type = inferPriceTypeFromPriceText(detail.price_text)
-  const is_kids = inferKidsFromWalkerplusCategories(rawCategories)
+  const is_kids = inferKidsFromWalkerplusCategories(rawCategories, detail.title)
   const now = new Date().toISOString()
 
   const imageMeta = detail.image_url

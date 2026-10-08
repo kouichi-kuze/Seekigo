@@ -307,7 +307,7 @@ function planOne(
     municipality: place.municipality,
     category,
     priceType: inferPriceTypeFromPriceText(detail.price_text),
-    isKids: inferKidsFromWalkerplusCategories(detail.categories),
+    isKids: inferKidsFromWalkerplusCategories(detail.categories, detail.title),
     isIndoor: null,
     isNight: inferIsNight({
       title: detail.title,

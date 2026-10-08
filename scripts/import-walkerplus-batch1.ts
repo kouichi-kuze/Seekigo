@@ -264,7 +264,7 @@ function planOne(detail: StoredDetail, pool: DedupeExisting[], attached: Set<str
     municipality: place.municipality,
     category,
     priceType: inferPriceTypeFromPriceText(detail.price_text),
-    isKids: inferKidsFromWalkerplusCategories(rawCategories),
+    isKids: inferKidsFromWalkerplusCategories(rawCategories, detail.title),
     isIndoor: null,
     isNight: inferIsNight({
       title: detail.title,

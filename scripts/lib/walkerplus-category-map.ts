@@ -3,6 +3,7 @@
  * anime 専用 enum は Phase 1A では追加しない。
  */
 import type { CategoryValue } from './ai-enrichment'
+import { inferKidsFromAudienceText } from './kids-inference'
 
 export type WalkerplusCategoryMapping = {
   mapped: CategoryValue[]
@@ -25,6 +26,7 @@ const WORKSHOP_RE = /ワークショップ|講演|トーク/
 function mapSingleWalkerplusCategory(raw: string): CategoryValue | null {
   const t = raw.trim()
   if (!t) return null
+  if (isCompanionOnlyCategory(t)) return null
 
   if (EXHIBITION_RE.test(t)) return 'exhibition'
   if (ANIME_GAME_RE.test(t)) return 'exhibition'
@@ -62,9 +64,32 @@ export function mapWalkerplusCategories(
   }
 }
 
+const COMPANION_TOKEN =
+  /^(?:子供と|子どもと|こどもと|お子様と|お子さまと|恋人と|夫婦で|友達と|友人と|一人で|両親と|家族で|仲間と)$/
+
+/** 「誰と行く」の同行者タグ。イベントの対象者ではない。 */
+function isCompanionOnlyCategory(label: string): boolean {
+  const parts = label
+    .split(/[/／・,、\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  return parts.length > 0 && parts.every((part) => COMPANION_TOKEN.test(part))
+}
+
 export function inferKidsFromWalkerplusCategories(
   rawCategories: string[] | null | undefined,
+  audienceText?: string | null,
 ): boolean | null {
-  if (!rawCategories?.length) return null
-  return rawCategories.some((c) => KIDS_RE.test(c)) ? true : null
+  let sawExclusion = false
+  for (const category of rawCategories ?? []) {
+    const label = category.trim()
+    if (!label || isCompanionOnlyCategory(label)) continue
+    const judged = inferKidsFromAudienceText(label)
+    if (judged === true) return true
+    if (judged === false) sawExclusion = true
+  }
+  const fromText = inferKidsFromAudienceText(audienceText)
+  if (fromText === true) return true
+  if (sawExclusion || fromText === false) return false
+  return null
 }
