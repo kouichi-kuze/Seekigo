@@ -177,7 +177,7 @@ const detailUrl = event.slug
     {hasAnyTag && (
       <ul class="card-attrs">
         {priceChip && <li class:list={['tag', isFreeChip && 'tag--free']}>{priceChip}</li>}
-        {event.is_kids && <li class="tag">{locale === 'en' ? EVENT_UI_EN.forKids : '子ども向け'}</li>}
+        {event.is_kids && <li class="tag">{locale === 'en' ? EVENT_UI_EN.family : 'ファミリー'}</li>}
         {event.is_indoor && <li class="tag">{locale === 'en' ? EVENT_UI_EN.indoor : '屋内'}</li>}
         {event.is_night && <li class="tag">{locale === 'en' ? EVENT_UI_EN.night : '夜'}</li>}
       </ul>

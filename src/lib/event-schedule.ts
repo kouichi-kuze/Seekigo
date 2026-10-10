@@ -422,7 +422,7 @@ export function buildEventDetailChips(input: {
     chips.push({ id: 'price', label: priceChip })
   }
   if (input.isKids === true) {
-    chips.push({ id: 'kids', label: ja ? '子ども向け' : EVENT_UI_EN.forKids })
+    chips.push({ id: 'kids', label: ja ? '家族で楽しむ' : EVENT_UI_EN.forKids })
   }
   if (input.isIndoor === true) {
     chips.push({ id: 'indoor', label: ja ? '屋内' : EVENT_UI_EN.indoor })

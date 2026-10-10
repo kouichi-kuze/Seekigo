@@ -97,7 +97,7 @@ export const REACTION_SIGNAL_TAGS: {
     label: '比較的ゆったり',
     when: (s) => s.crowd_level === 'low',
   },
-  { key: 'family', label: '子ども向け', when: (s) => s.family === true },
+  { key: 'family', label: '家族で楽しむ', when: (s) => s.family === true },
   { key: 'date', label: 'デート', when: (s) => s.date === true },
   { key: 'solo', label: '一人でも', when: (s) => s.solo === true },
   { key: 'photo', label: '写真', when: (s) => s.photo === true },

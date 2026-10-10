@@ -252,9 +252,9 @@ function isFriendlyNo(value: string | null | undefined): boolean {
 export function resolveFamilyFriendlyLabel(
   event: VisitDisplayEvent,
 ): string | null {
-  if (isFriendlyYes(event.family_friendly)) return '子ども向け'
+  if (isFriendlyYes(event.family_friendly)) return '家族で楽しむ'
   if (isFriendlyNo(event.family_friendly)) return null
-  if (event.is_kids === true) return '子ども向け'
+  if (event.is_kids === true) return '家族で楽しむ'
   return null
 }
 
