@@ -432,3 +432,100 @@ test('a second bulk create does not register the same reviews again', async () =
   assert.equal(published.title, '既存の公開イベント')
   assert.deepEqual(db.eventsUpdated, [])
 })
+
+test('minato ambiguous create saves a past-dated draft and does not duplicate it', async () => {
+  const db = createFake({
+    events: [
+      {
+        id: 88,
+        status: 'published',
+        title: '第37回フランス料理昼食会',
+        slug: 'minato-existing',
+        start_date: '2026-11-12',
+      },
+    ],
+    reviews: [
+      review({
+        id: 8,
+        candidate_event_id: 88,
+        incoming_source_name: 'minato_opendata',
+        incoming_source_url:
+          'https://www.city.minato.tokyo.jp/kouhou/event/261003-humanitude.html',
+        incoming_payload: {
+          title: '「ユマニチュード®」家族介護者向け講座',
+          start_date: '2026-10-03',
+          end_date: '2026-10-03',
+          venue: '介護予防総合センター（みなとパーク芝浦2階）',
+          source_url:
+            'https://www.city.minato.tokyo.jp/kouhou/event/261003-humanitude.html',
+          official_url:
+            'https://www.city.minato.tokyo.jp/kouhou/event/261003-humanitude.html',
+        },
+      }),
+    ],
+  })
+
+  const created = await applyDedupeReviewAction(db as never, 'dedupe_create', 8)
+  assert.equal(created.kind, 'created')
+  assert.notEqual(created.eventId, 88)
+  const draft = db.tables.events.find((row) => row.id === created.eventId)
+  assert.equal(draft?.status, 'draft')
+  assert.equal(draft?.start_date, '2026-10-03')
+  assert.equal(db.tables.events.find((row) => row.id === 88)?.title, '第37回フランス料理昼食会')
+  assert.equal(db.tables.event_dedupe_reviews[0].status, 'created')
+  assert.equal(db.tables.event_sources.length, 1)
+  assert.deepEqual(db.eventsUpdated, [])
+
+  await assert.rejects(
+    () => applyDedupeReviewAction(db as never, 'dedupe_create', 8),
+    /not pending/,
+  )
+  assert.equal(db.tables.events.filter((row) => row.status === 'draft').length, 1)
+  assert.equal(db.tables.event_sources.length, 1)
+})
+
+test('an already attached source URL is not inserted again', async () => {
+  const db = createFake({
+    events: [
+      {
+        id: 88,
+        status: 'published',
+        title: '第37回フランス料理昼食会',
+        slug: 'minato-existing',
+      },
+    ],
+    sources: [
+      {
+        id: 1,
+        event_id: 88,
+        source_name: 'minato_opendata',
+        source_url:
+          'https://www.city.minato.tokyo.jp/kouhou/event/261003-humanitude.html',
+      },
+    ],
+    reviews: [
+      review({
+        id: 8,
+        candidate_event_id: 88,
+        incoming_source_name: 'minato_opendata',
+        incoming_source_url:
+          'https://www.city.minato.tokyo.jp/kouhou/event/261003-humanitude.html',
+        incoming_payload: {
+          title: '「ユマニチュード®」家族介護者向け講座',
+          start_date: '2026-10-03',
+          source_url:
+            'https://www.city.minato.tokyo.jp/kouhou/event/261003-humanitude.html',
+        },
+      }),
+    ],
+  })
+
+  await assert.rejects(
+    () => applyDedupeReviewAction(db as never, 'dedupe_create', 8),
+    /登録済みです \(event_id=88\)/,
+  )
+  assert.equal(db.tables.events.length, 1)
+  assert.equal(db.tables.events[0].title, '第37回フランス料理昼食会')
+  assert.equal(db.tables.event_dedupe_reviews[0].status, 'pending')
+  assert.equal(db.tables.event_sources.length, 1)
+})

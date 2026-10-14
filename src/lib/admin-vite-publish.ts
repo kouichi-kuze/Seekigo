@@ -77,6 +77,14 @@ export function adminFailureRedirect(
   if (intent === 'generated_image_approve_displayed') {
     return `/admin/events/reviews/image/?error=${encodeURIComponent(message)}`
   }
+  if (
+    intent === 'dedupe_link' ||
+    intent === 'dedupe_create' ||
+    intent === 'dedupe_create_bulk' ||
+    intent === 'dedupe_reject'
+  ) {
+    return `/admin/events/draft/?error=${encodeURIComponent(message)}#dedupe-reviews`
+  }
   if (intent.startsWith('generated_image_')) {
     const eventId = params.get('event_id') ?? ''
     const back = params.get('return_to') ?? ''

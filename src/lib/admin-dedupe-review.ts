@@ -68,9 +68,28 @@ function isValidYmd(value: string | null | undefined): boolean {
 
 function assertDedupeReviewSource(name: string): EventSourceName {
   if (!isEventSourceName(name)) {
-    throw new Error(`Invalid source name: ${name}`)
+    throw new Error(`未対応の取得元です: ${name}`)
   }
   return name
+}
+
+function draftImageMeta(
+  sourceName: EventSourceName,
+  imageUrl: string | null | undefined,
+) {
+  if (
+    imageUrl &&
+    (sourceName === 'gotokyo' ||
+      sourceName === 'enjoytokyo' ||
+      sourceName === 'walkerplus')
+  ) {
+    return defaultImageMetaForSource(sourceName)
+  }
+  return {
+    image_usage_status: 'unknown' as const,
+    image_source: null,
+    image_credit: null,
+  }
 }
 
 function resolveSourceEventId(
@@ -235,6 +254,19 @@ async function createNewDraft(
   }
   if (!sourceUrl) throw new Error('incoming source_url is required')
 
+  const { data: existingSource, error: sourceLookupErr } = await admin
+    .from('event_sources')
+    .select('event_id')
+    .eq('source_name', sourceName)
+    .eq('source_url', sourceUrl)
+    .maybeSingle()
+  if (sourceLookupErr) throw sourceLookupErr
+  if (existingSource?.event_id) {
+    throw new Error(
+      `この取得元URLは登録済みです (event_id=${existingSource.event_id})。新規draftは作りません。`,
+    )
+  }
+
   if (payload.end_date != null && payload.end_date !== '') {
     if (!isValidYmd(String(payload.end_date))) {
       throw new Error('incoming end_date is invalid')
@@ -299,13 +331,7 @@ async function createNewDraft(
     category,
     summary: payload.summary ?? null,
     image_url: payload.image_url ?? null,
-    ...(payload.image_url
-      ? defaultImageMetaForSource(sourceName)
-      : {
-          image_usage_status: 'unknown' as const,
-          image_source: null,
-          image_credit: null,
-        }),
+    ...draftImageMeta(sourceName, payload.image_url),
     status: 'draft' as const,
     last_checked_at: now,
   }
@@ -459,7 +485,7 @@ export async function processAdminDedupeReviewPost(opts: {
     }
     return {
       ok: true,
-      redirectTo: `/admin/events/draft/?${params.toString()}`,
+      redirectTo: `/admin/events/draft/?${params.toString()}#dedupe-reviews`,
     }
   }
 
@@ -475,19 +501,19 @@ export async function processAdminDedupeReviewPost(opts: {
     if (result.kind === 'linked') {
       return {
         ok: true,
-        redirectTo: `/admin/events/draft/?review=linked&event_id=${result.eventId}`,
+        redirectTo: `/admin/events/draft/?review=linked&event_id=${result.eventId}#dedupe-reviews`,
       }
     }
     if (result.kind === 'created') {
       return {
         ok: true,
-        redirectTo: `/admin/events/draft/?review=created&event_id=${result.eventId}`,
+        redirectTo: `/admin/events/draft/?review=created&event_id=${result.eventId}#dedupe-reviews`,
       }
     }
     if (result.kind === 'rejected') {
       return {
         ok: true,
-        redirectTo: `/admin/events/draft/?review=rejected&review_id=${reviewId}`,
+        redirectTo: `/admin/events/draft/?review=rejected&review_id=${reviewId}#dedupe-reviews`,
       }
     }
   } catch (error) {

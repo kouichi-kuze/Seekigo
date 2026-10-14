@@ -436,6 +436,8 @@ function eventDisplayImage(event: AdminEvent) {
           会場や area が同じだけでは候補にしません。published 本体は紐付け時も変更しません。
           処理済み（created / linked / rejected）は再読込後もここには出ません。
         </p>
+        {message && <p class="ok">{message}</p>}
+        {errorMessage && <p class="err">{errorMessage}</p>}
 
         {!loadError && reviews.length === 0 && (
           <p>現在、pending の重複候補はありません。</p>
@@ -1342,7 +1344,14 @@ function eventDisplayImage(event: AdminEvent) {
             msg =
               'この変更を却下します（本体は変更しません）。よろしいですか？'
           }
-          if (!confirm(msg)) e.preventDefault()
+          if (!confirm(msg)) {
+            e.preventDefault()
+            return
+          }
+          if (intent === 'dedupe_create') {
+            const btn = e.submitter
+            if (btn) btn.disabled = true
+          }
         })
       }
 
